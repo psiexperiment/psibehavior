@@ -1,0 +1,431 @@
+import logging
+log = logging.getLogger(__name__)
+
+from enaml.application import deferred_call
+from enaml.core.api import Looper
+from enaml.widgets.api import Action, Label, ToolBar
+from enaml.workbench.api import Extension
+from enaml.workbench.core.api import Command
+
+from psi.context.api import (
+    BoolParameter, EnumParameter, ContextGroup, ContextRow, Parameter, Result
+)
+from psi.controller.api import (
+    ContinuousInput, ContinuousOutput, ControllerManifest, EpochOutput,
+    ExperimentAction, ExperimentEvent, ExperimentState
+)
+from psi.data.sinks.api import EventLog, TrialLog
+from psi.experiment.api import StatusItem
+from psi.data.plots import (TimeContainer, ChannelPlot, ViewBox)
+from psi.data.sinks.api import BinaryStore
+
+from .behavior_nafc_plugin import BehaviorPlugin, NAFCEvent
+
+
+def get_status(trial, trial_state, experiment_state, side):
+    # Experiment not running
+    if experiment_state == 'paused':
+        return 'Experiment paused'
+    elif experiment_state == 'initialized':
+        return 'Waiting to start'
+    elif experiment_state == 'stopped':
+        return 'Experiment complete'
+    state = '' if trial_state is None else trial_state.value
+    return 'Trial {} - {} (respond on {})'.format(trial, state, side)
+
+
+def process_et(event):
+    plugin = event.workbench.get_plugin('psi.controller')
+    name = event.parameters['name']
+    events = event.parameters['data'].events
+    for _, (edge, ts) in events[['event', 'ts']].iterrows():
+        plugin.et_callback(name, edge, ts)
+
+
+def update_trial_log(event):
+    core = event.workbench.get_plugin('enaml.workbench.core')
+    core.invoke_command('trial_log.save', {'data': event.parameters['result']})
+
+
+def check_microphones(workbench, manifest):
+    controller = workbench.get_plugin('psi.controller')
+    data = workbench.get_plugin('psi.data')
+    channels = []
+    for engine in controller._engines.values():
+        engine_channels = engine.get_channels(mode='analog', direction='input', active=False)
+        channels.extend(engine_channels)
+
+    channel_names = [c.name for c in channels if 'microphone' in c.name]
+    manifest.input_list = channel_names
+    data._refresh_plots()
+
+
+enamldef BehaviorManifest(ControllerManifest): manifest:
+    '''
+    Defines the core settings that any behavior experiment may require. Does
+    not include timeout/reward settings as those are provided by plugins.
+
+    The IOManifest is required to have:
+
+    * A timed trigger input called `sync_trigger`. This can either be connected
+      to an analog or digital output.
+    '''
+    initialized ::
+        deferred_call(check_microphones, workbench, manifest)
+
+    attr input_list = []
+
+    #: Sets the name of the response inputs (e.g., `spout`, etc.). This is
+    #: provided for backwards-compatibility with psilbhb which expects to see
+    #: `spout` instead of `resp`.
+    attr response_name = 'resp'
+
+    #: Number of response inputs (i.e., lick spouts or food hoppers). 
+    #: 1 = go/nogo. 2+ = NAFC.
+    attr N_response = 1
+
+    #: Number of speaker outputs
+    attr N_output = 1
+
+    factory = lambda: BehaviorPlugin(N_response=N_response,
+                                     response_name=response_name)
+
+    Extension:
+        id = manifest.id + '.status'
+        point = 'psi.experiment.status'
+
+        StatusItem:
+            label = 'Experiment state'
+            Label:
+                text << get_status(
+                    workbench.get_plugin('psi.controller').trial,
+                    workbench.get_plugin('psi.controller').trial_state,
+                    workbench.get_plugin('psi.controller').experiment_state,
+                    workbench.get_plugin('psi.controller').side,
+                )
+
+    Extension:
+        id = manifest.id + '.behavior_commands'
+        point = 'enaml.workbench.core.commands'
+        Command:
+            id = 'psi.controller.process_et'
+            handler = process_et
+        Command:
+            id = 'psi.controller.update_trial_log'
+            handler = update_trial_log
+        Command:
+            id = 'psi.controller.prepare_trial'
+            handler = lambda x: controller.prepare_trial()
+        Command:
+            id = 'psi.controller.start_trial'
+            handler = lambda x: controller.start_trial
+
+    Extension:
+        id = manifest.id + '.nafc_events'
+        point = 'psi.controller.actions'
+
+        ExperimentState:
+            name = 'trial'
+
+        ExperimentState:
+            name = 'digital_reward'
+        ExperimentState:
+            name = 'reward'
+        ExperimentState:
+            name = 'iti'
+        ExperimentState:
+            name = 'response'
+        ExperimentState:
+            name = 'to'
+        ExperimentEvent:
+            name = 'response_duration_elapsed'
+
+        ExperimentEvent:
+            name = 'iti_duration_elapsed'
+        ExperimentEvent:
+            name = 'to_duration_elapsed'
+
+        ExperimentEvent:
+            name = 'trial_ready'
+
+        ExperimentAction:
+            # This schedules a TTL pulse to be sent via the channel linked to
+            # the sync_trigger output. The TTL pulse will start at the exact
+            # same time as target_start and last for 0.5 sec. Whenever an
+            # ExperimentAction is triggered, kwargs will automatically include
+            # the event name (in this case, "target_start") and the timestamp
+            # the event occurred (this is how the sync_trigger.trigger command
+            # knows when to schedule the trigger to begin). If the event was
+            # hardware-timed, then the timestamp will be accurate down to the
+            # sample).
+            event = 'output_1_start'
+            command = 'sync_trigger.trigger'
+            kwargs = {'duration': 0.5}
+
+        Looper:
+            # Set up the actions and events for each response that the animal
+            # will provide a response at.
+            iterable = range(N_response)
+
+            ExperimentAction:
+                event = f'{response_name}_contact_{loop_item+1}_digital_acquired'
+                command = 'psi.controller.process_et'
+                kwargs = {'name': f'{response_name}_contact_{loop_item+1}'}
+
+            ExperimentEvent:
+                name = f'deliver_reward_{loop_item+1}'
+
+        ExperimentAction:
+            event = 'np_contact_digital_acquired'
+            command = 'psi.controller.process_et'
+            kwargs = {'name': 'np_contact'}
+
+        ExperimentAction:
+            event = 'engines_configured'
+            command = 'psi.controller.prepare_trial'
+
+        ExperimentAction:
+            event = 'engines_started'
+            command = 'room_light_toggle.on'
+
+        ExperimentAction:
+            event = 'to_start'
+            command = 'room_light_toggle.toggle'
+            kwargs = {'state': C.lookup('keep_lights_on')}
+
+        ExperimentAction:
+            event = 'to_end'
+            command = 'room_light_toggle.on'
+
+        # This action is mandatory and must be executed before any other
+        # commands that require some information from context. By default, an
+        # infinite number of cycles are specified.
+        ExperimentAction:
+            event = 'experiment_initialize'
+            command = 'psi.context.initialize'
+            kwargs = {'selector': None}
+        ExperimentAction:
+            event = 'trial_end'
+            command = 'psi.controller.update_trial_log'
+
+    Extension:
+        id = manifest.id + '.data'
+        point = 'psi.data.sinks'
+        BinaryStore:
+            # Make sure we save all the behavior data (IR sensors and
+            name = 'behavior_data'
+            continuous_inputs = ['np_contact_analog'] + \
+                [f'{response_name}_contact_{i+1}_analog' for i in range(N_response)]
+
+        EventLog:
+            # Exclude the IR contact detection events since these are numerous
+            # and messy.
+            show_widget = True
+            exclude = ['*contact*digital_acquired*']
+
+        TrialLog:
+            show_widget = True
+
+    Extension:
+        id = 'io'
+        point = 'psi.controller.io'
+
+        Looper:
+            # Create an epoch and continous output for each speaker channel.
+            iterable = range(N_output)
+
+            ContinuousOutput:
+                name = f'continuous_output_{loop_item+1}'
+                label = f'Continuous Output {loop_item+1}'
+                target_name = f'hw_ao::speaker_{loop_item+1}'
+                configurable = False
+
+            EpochOutput:
+                name = f'output_{loop_item+1}'
+                label = f'Output {loop_item+1}'
+                target_name = f'hw_ao::speaker_{loop_item+1}'
+                configurable = False
+
+    Extension:
+        id = manifest.id + '.items'
+        point = 'psi.context.items'
+
+        ContextGroup:
+            name = 'trial'
+            label = 'Trial'
+
+            EnumParameter:
+                name = 'repeat_incorrect'
+                label = 'Repeat incorrect/invalid trials?'
+                compact_label = 'repeat_incorrect'
+                default = 'Yes'
+                choices = {'No': 0, 'Early only': 1, 'Yes': 2}
+            Parameter:
+                name = 'iti_duration'
+                label = 'Intertrial interval (s)'
+                compact_label = 'ITI'
+                default = 0.1
+            Parameter:
+                name = 'to_duration'
+                label = 'Timeout duration (s)'
+                compact_label = 'TO'
+                default = 1.0
+            Parameter:
+                name = 'response_duration'
+                label = 'Response duration (s)'
+                compact_label = 'Resp'
+                default = 3.0
+            Parameter:
+                name = 'target_delay'
+                label = 'Target delay (s)'
+                default = 0.5
+            Parameter:
+                name = 'np_duration'
+                label = 'Nose-poke start duration (s)'
+                compact_label = 'NP'
+                default = 0.25
+            Parameter:
+                name = 'hold_duration'
+                label = 'Nose-poke hold duration (s)'
+                compact_label = 'Hold'
+                default = 0.0
+            BoolParameter:
+                name = 'training_mode'
+                label = 'Training mode'
+                scope = 'arbitrary'
+                default = True
+            BoolParameter:
+                name = 'manual_control'
+                label = 'Manual control?'
+                scope = 'arbitrary'
+                default = False
+            BoolParameter:
+                name = 'keep_lights_on'
+                label = 'Lights on during TO?'
+                scope = 'arbitrary'
+                default = False
+
+        ContextGroup:
+            name = 'results'
+            label = 'Trial results'
+
+            Result:
+                name = 'response'
+                compact_label = 'Resp.'
+                dtype = 'S32'
+            Result:
+                name = 'trial_type'
+                compact_label = 'Type'
+                dtype = 'S32'
+            Result:
+                name = 'score'
+                dtype = 'S32'
+            Result:
+                name = 'correct'
+                compact_label = 'C'
+                dtype = 'bool'
+            Result:
+                name = 'response_ts'
+                label = 'Response timestamp'
+                compact_label = 'R|'
+                dtype = 'float64'
+            Result:
+                name = 'trial_start'
+                compact_label = 'T/'
+                dtype = 'float64'
+            Result:
+                name = 'response_time'
+                compact_label = 'Resp. time'
+                dtype = 'float64'
+
+    Extension:
+        id = manifest.id + '.toolbar'
+        point = 'psi.experiment.toolbar'
+
+        ToolBar:
+            Action:
+                text = 'Request Remind'
+                triggered ::
+                    controller.request_remind()
+                enabled << controller.experiment_state  == 'running'
+            Action:
+                text = 'Start Trial'
+                triggered ::
+                    controller.request_trial()
+                enabled << controller.experiment_state == 'running' \
+                    and controller.manual_control
+            Action:
+                separator = True
+            Action:
+                text = 'Simulate poke'
+                checkable = True
+                toggled ::
+                    if checked:
+                        controller.handle_event(NAFCEvent.digital_np_start)
+                    else:
+                        controller.handle_event(NAFCEvent.digital_np_end)
+                enabled << controller.experiment_state not in ('initialized', 'stopped')
+            Looper:
+                iterable = range(N_response)
+                Action:
+                    text = f'Simulate {response_name} {loop_item+1}'
+                    checkable = True
+                    toggled ::
+                        if checked:
+                            event = getattr(NAFCEvent, f'digital_{response_name}_{loop_item+1}_start')
+                        else:
+                            event = getattr(NAFCEvent, f'digital_{response_name}_{loop_item+1}_end')
+                        controller.handle_event(event)
+                    enabled << controller.experiment_state not in ('initialized', 'stopped')
+            Action:
+                separator = True
+            Action:
+                text = 'Pause'
+                enabled << controller.experiment_state not in ('initialized', 'stopped')
+                checkable = True
+                toggled ::
+                    if checked:
+                        log.info('Requesting pause')
+                        controller.request_pause()
+                    else:
+                        log.info('Requesting resume')
+                        controller.request_resume()
+            Action:
+                text = 'Random poke generator'
+                checkable = True
+                triggered ::
+                    if checked:
+                        controller.start_random_behavior()
+                    else:
+                        controller.stop_random_behavior()
+
+    Extension:
+        id = 'plots'
+        point = 'psi.data.plots'
+
+        TimeContainer:
+            name = 'trial_plot_container'
+            label = 'Trial timing'
+            span = 10
+
+            ViewBox:
+                name = 'IR_sensors'
+                y_label = 'IR sensors (V)'
+                y_min = 0
+                y_max = 5
+
+                Looper: looper:
+                    attr colors = ['blue', 'red', 'yellow', 'orange']
+                    iterable = range(N_response)
+
+                    ChannelPlot:
+                        decimate_mode = 'none'
+                        source_name = f'{response_name}_contact_{loop_item+1}'
+                        pen_color = looper.colors[loop_item]
+                        label = f'Response {loop_item+1}'
+
+                ChannelPlot:
+                    decimate_mode = 'none'
+                    source_name = 'np_contact_analog'
+                    pen_color = 'black'
+                    label = 'Nose-poke (initiate)'

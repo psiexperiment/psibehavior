@@ -1,0 +1,30 @@
+[project]
+name = "psibehavior"
+description = "Module for running behavior experiments using psiexperiment framework"
+requires-python = ">=3.7"
+license = {file = "LICENSE.txt"}
+authors = [
+    {name = "Brad Buran", email="buran@ohsu.edu"},
+    {name = "Stephen David", email="davids@ohsu.edu"},
+]
+maintainers = [
+    {name = "Brad Buran", email="buran@ohsu.edu"},
+    {name = "Stephen David", email="davids@ohsu.edu"},
+]
+dependencies = [
+    "enaml[qt6-pyside]",
+    "psiexperiment[ni,zarr]",
+    "psivideo",
+    "joblib",
+]
+dynamic = ["version"]
+
+[project.scripts]
+psi-behavior = "psibehavior.app.launcher:main"
+
+[build-system]
+requires = ["setuptools>=61.2", "wheel", "setuptools_scm[toml]>=3.4.3"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "psibehavior/version.py"
