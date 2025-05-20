@@ -28,6 +28,14 @@ ParadigmDescription(
     COMMON_PLUGINS + [
         {'manifest': PATH + 'behavior_nafc.BehaviorManifest',
          'attrs': {'N_response': 2, 'N_output': 1},
+        {'manifest': PATH + 'reward.PelletDispenser',
+         'attrs': {'output_name': 'pellet_1', 'label': 'Pellet 1', 'event_name': 'deliver_reward_1'},
+         'required': True
+         },
+        {'manifest': PATH + 'reward.PelletDispenser',
+         'attrs': {'output_name': 'pellet_2', 'label': 'Pellet 2', 'event_name': 'deliver_reward_2'},
+         'required': True
+         },
          },
     ],
 )

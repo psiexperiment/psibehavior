@@ -1,4 +1,5 @@
-from enaml.widgts.api import Action, Label
+from enaml.widgets.api import Action, Label
+from enaml.workbench.api import Extension
 
 from psi.context.api import Parameter
 from psi.controller.api import ExperimentAction
@@ -14,20 +15,11 @@ enamldef BaseRewardDispenser(ExperimentManifest): manifest:
     Defines generic reward dispenser that can be triggered by a TTL
     '''
     id = f'{output_name}_reward_dispenser'
-    attr duration
     attr output_name
     attr label
 
-    #: Name of event to deliver reward for
+    #: Name of event that is called when reward is delivered.
     attr event_name = 'deliver_reward'
-
-    Extension:
-        id = manifest.id + '.actions'
-        point = 'psi.controller.actions'
-        ExperimentAction:
-            event = event_name
-            command = f'{manifest.output_name}.fire'
-            kwargs = {'duration': C.lookup(manifest.parameter_name)}
 
     Extension:
         id = manifest.id + '.status_item'
@@ -49,7 +41,7 @@ enamldef BaseRewardDispenser(ExperimentManifest): manifest:
             text = f'Dispense ({manifest.label})'
             triggered ::
                 controller = workbench.get_plugin('psi.controller')
-                controller.invoke_actions('deliver_reward')
+                controller.invoke_actions(manifest.event_name)
             enabled <<  workbench.get_plugin('psi.controller').experiment_state \
                 not in ('initialized', 'stopped')
 
@@ -70,6 +62,14 @@ enamldef WaterBolusDispenser(BaseRewardDispenser): manifest:
     attr parameter_name = f'{manifest.output_name}_duration'
 
     Extension:
+        id = manifest.id + '.actions'
+        point = 'psi.controller.actions'
+        ExperimentAction:
+            event = event_name
+            command = f'{manifest.output_name}.fire'
+            kwargs = {'duration': C.lookup(manifest.parameter_name)}
+
+    Extension:
         id = manifest.id + '.parameters'
         point = 'psi.context.items'
 
@@ -84,8 +84,17 @@ enamldef WaterBolusDispenser(BaseRewardDispenser): manifest:
 
 enamldef PelletDispenser(BaseRewardDispenser): manifest:
     '''
-    Subclasses generic reward dispenser define trigger duration and output.
+    Subclasses generic reward dispenser with fixed trigger duration for activating dispense.
     '''
     id = f'{output_name}_dispenser'
-    duration = 0.1
     output_name = 'pellet_dispense'
+    attr duration = 0.1
+
+    Extension:
+        id = manifest.id + '.actions'
+        point = 'psi.controller.actions'
+        ExperimentAction:
+            event = event_name
+            command = f'{manifest.output_name}.fire'
+            kwargs = {'duration': duration}
+
