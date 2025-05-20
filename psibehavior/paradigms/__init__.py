@@ -29,6 +29,13 @@ ParadigmDescription(
          'attrs': {'output_name': 'pellet_2', 'label': 'Pellet 2', 'event_name': 'deliver_reward_2'},
          'required': True
          },
+
+        # Timeout
+        {'manifest': PATH + 'timeout.Light',
+         'attrs': {},
+         'required': True
+         },
+
         {'manifest': PATH + 'monitor.SignalMonitor',
          'attrs': {'monitor_channels': ['loopback_1']},
          'required': True,

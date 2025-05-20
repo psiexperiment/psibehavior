@@ -1,0 +1,38 @@
+from enaml.workbench.api import Extension
+
+from psi.context.api import BoolParameter
+from psi.controller.api import ExperimentAction
+from psi.core.enaml.api import ExperimentManifest
+
+enamldef Light(ExperimentManifest): manifest:
+
+    id = 'timeout_light'
+
+    Extension:
+        id = manifest.id + '.items'
+        point = 'psi.context.items'
+
+        BoolParameter:
+            name = 'keep_lights_on'
+            label = 'Lights on during TO?'
+            scope = 'arbitrary'
+            default = False
+            group_name = 'trial'
+
+    Extension:
+        id = manifest.id + '.actions'
+        point = 'psi.controller.actions'
+
+        ExperimentAction:
+            event = 'engines_started'
+            command = 'room_light.on'
+
+        ExperimentAction:
+            event = 'to_start'
+            command = 'room_light.toggle'
+            kwargs = {'state': C.lookup('keep_lights_on')}
+
+        ExperimentAction:
+            event = 'to_end'
+            command = 'room_light.on'
+

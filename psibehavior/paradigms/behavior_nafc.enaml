@@ -184,19 +184,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             event = 'engines_configured'
             command = 'psi.controller.prepare_trial'
 
-        ExperimentAction:
-            event = 'engines_started'
-            command = 'room_light.on'
-
-        ExperimentAction:
-            event = 'to_start'
-            command = 'room_light.toggle'
-            kwargs = {'state': C.lookup('keep_lights_on')}
-
-        ExperimentAction:
-            event = 'to_end'
-            command = 'room_light.on'
-
         # This action is mandatory and must be executed before any other
         # commands that require some information from context. By default, an
         # infinite number of cycles are specified.
@@ -297,11 +284,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             BoolParameter:
                 name = 'manual_control'
                 label = 'Manual control?'
-                scope = 'arbitrary'
-                default = False
-            BoolParameter:
-                name = 'keep_lights_on'
-                label = 'Lights on during TO?'
                 scope = 'arbitrary'
                 default = False
 
