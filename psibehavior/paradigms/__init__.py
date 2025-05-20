@@ -13,13 +13,6 @@ COMMON_PLUGINS = [
          'port': 33331,
          'filename': 'top_recording.avi',
      }},
-    {'manifest': CORE_PATH + 'signal_mixins.SignalFFTViewManifest',
-     'attrs': {
-         'fft_time_span': 1,
-         'fft_freq_lb': 5,
-         'fft_freq_ub': 24000,
-         'y_label': 'Level (dB)'},
-     },
 ]
 
 
@@ -36,6 +29,9 @@ ParadigmDescription(
          'attrs': {'output_name': 'pellet_2', 'label': 'Pellet 2', 'event_name': 'deliver_reward_2'},
          'required': True
          },
+        {'manifest': PATH + 'monitor.SignalMonitor',
+         'attrs': {'monitor_channels': ['loopback_1']},
+         'required': True,
          },
     ],
 )
