@@ -2,7 +2,7 @@ from enaml.widgets.api import Action, Label
 from enaml.workbench.api import Extension
 
 from psi.context.api import Parameter
-from psi.controller.api import ExperimentAction
+from psi.controller.api import ExperimentAction, Trigger
 from psi.core.enaml.api import ExperimentManifest
 from psi.experiment.api import StatusItem
 
@@ -20,6 +20,14 @@ enamldef BaseRewardDispenser(ExperimentManifest): manifest:
 
     #: Name of event that is called when reward is delivered.
     attr event_name = 'deliver_reward'
+
+    Extension:
+        id = manifest.id + '.io'
+        point = 'psi.controller.io'
+
+        Trigger:
+            target_name = f'sw_do::{manifest.output_name}'
+            name = manifest.output_name
 
     Extension:
         id = manifest.id + '.status_item'

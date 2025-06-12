@@ -2,7 +2,7 @@ import logging
 log = logging.getLogger(__name__)
 
 from enaml.application import deferred_call
-from enaml.core.api import Looper
+from enaml.core.api import Conditional, Looper
 from enaml.widgets.api import Action, Label, ToolBar
 from enaml.workbench.api import Extension
 from enaml.workbench.core.api import Command
@@ -16,7 +16,7 @@ from psi.controller.api import (
 )
 from psi.data.sinks.api import EventLog, TrialLog
 from psi.experiment.api import StatusItem
-from psi.data.plots import (TimeContainer, ChannelPlot, ViewBox)
+from psi.data.plots import (TimeContainer, TimepointPlot, ChannelPlot, ViewBox)
 from psi.data.sinks.api import BinaryStore
 
 from .behavior_nafc_plugin import BehaviorPlugin, NAFCEvent
@@ -73,6 +73,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     initialized ::
         deferred_call(check_microphones, workbench, manifest)
 
+    # Not to be populated manually?
     attr input_list = []
 
     #: Sets the name of the response inputs (e.g., `spout`, etc.). This is
@@ -86,6 +87,10 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
 
     #: Number of speaker outputs
     attr N_output = 1
+
+    #: Do the outputs have loopbacks? If so, it creates a loopback input for
+    #: each output. The assumption is that all outputs have loopbacks.
+    attr output_loopback = True
 
     factory = lambda: BehaviorPlugin(N_response=N_response,
                                      response_name=response_name)
@@ -233,9 +238,23 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 target_name = f'hw_ao::speaker_{loop_item+1}'
                 configurable = False
 
+            Conditional:
+                # If each output has a loopback input, be sure to make the
+                # inptus available.
+                condition = output_loopback
+
+                ContinuousInput:
+                    name = f'loopback_{loop_item+1}'
+                    label = f'Loopback {loop_item+1}'
+                    source_name = f'hw_ai::loopback_{loop_item+1}'
+
     Extension:
         id = manifest.id + '.items'
         point = 'psi.context.items'
+
+        ContextGroup:
+            name = 'hardware_settings'
+            label = 'Hardware Settings'
 
         ContextGroup:
             name = 'trial'
@@ -388,7 +407,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
         TimeContainer:
             name = 'trial_plot_container'
             label = 'Trial timing'
-            span = 10
+            span = 5
 
             ViewBox:
                 name = 'IR_sensors'
@@ -411,3 +430,15 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     source_name = 'np_contact_analog'
                     pen_color = 'black'
                     label = 'Nose-poke (initiate)'
+
+        TimepointPlot:
+            source_name = 'sync_trigger_edges'
+            y = 2.5
+            color = 'red'
+            viewbox_name = 'IR_sensors'
+
+        TimepointPlot:
+            source_name = 'loopback_ttl_edges'
+            y = 2.5
+            color = 'blue'
+            viewbox_name = 'IR_sensors'

@@ -35,4 +35,3 @@ enamldef Light(ExperimentManifest): manifest:
         ExperimentAction:
             event = 'to_end'
             command = 'room_light.on'
-

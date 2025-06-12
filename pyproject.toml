@@ -20,7 +20,7 @@ dependencies = [
 dynamic = ["version"]
 
 [project.scripts]
-psi-behavior = "psibehavior.app.launcher:main"
+abts = "psibehavior.app.main:abts"
 
 [build-system]
 requires = ["setuptools>=61.2", "wheel", "setuptools_scm[toml]>=3.4.3"]

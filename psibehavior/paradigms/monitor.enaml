@@ -1,0 +1,39 @@
+from enaml.core.api import Conditional
+from enaml.workbench.api import Extension
+
+from psi.core.enaml.api import ExperimentManifest
+from psi.data.sinks.api import BinaryStore
+from psi.paradigms.core.signal_mixins import (
+    MultiSignalViewExtension,
+    MultiSignalViewFFTExtension,
+)
+
+
+enamldef SignalMonitor(ExperimentManifest): manifest:
+
+    id = 'signal_monitor'
+    attr sources = {}
+    attr time_span = 4
+    attr show_fft = False
+
+    Extension:
+        id = manifest.id + '.data'
+        point = 'psi.data.sinks'
+
+        BinaryStore:
+            name = manifest.id + '.data'
+            continuous_inputs = list(manifest.sources.keys())
+
+    MultiSignalViewExtension:
+        id = manifest.id + '.view'
+        title = 'Monitor'
+        sources = manifest.sources
+        time_span = manifest.time_span
+
+    Conditional:
+        condition = manifest.show_fft
+
+        MultiSignalViewFFTExtension:
+            id = manifest.id + '.fft_view'
+            title = 'Monitor'
+            sources = manifest.sources
