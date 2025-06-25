@@ -1,0 +1,233 @@
+import logging
+log = logging.getLogger(__name__)
+
+import json
+from pathlib import Path
+
+import enaml
+from enaml.core.api import Conditional, Include, Looper
+from enaml.layout.api import spacer, vbox
+from enaml.stdlib.message_box import critical
+from enaml.widgets.api import (Action, ActionGroup, CheckBox, Container, Field,
+                               Form, GroupBox, HGroup, Label, MainWindow, Menu,
+                               MenuBar, ObjectCombo, PopupView, PushButton,
+                               VGroup)
+
+from psi import get_config, get_config_folder
+from psi.util import get_tagged_values
+from psi.controller.api import Channel
+from psi.core.enaml.api import load_manifest_from_file
+from psi.experiment.api import main_icon
+
+
+def load_defaults(launcher, experiments):
+    path = get_config_folder() / 'experiment_launcher.json'
+    try:
+        with path.open('r') as fh:
+            settings = json.load(fh)
+
+        es_settings = settings.pop('experiment', {})
+        for experiment in experiments:
+            t_settings = es_settings.get(experiment.experiment_type, {})
+            e_settings = t_settings.get(experiment.name, {})
+            for plugin in experiment.plugins:
+                p_settings = e_settings.get(plugin.id, {})
+                plugin.selected = p_settings.get('selected', plugin.selected)
+
+        for attr, value in settings.items():
+            setattr(launcher, attr, value)
+    except:
+        log.warn('%s does not exist', path)
+
+
+def set_defaults(launcher, experiments):
+    path = get_config_folder() / 'experiment_launcher.json'
+    path.parent.mkdir(exist_ok=True)
+    try:
+        with path.open('r') as fh:
+            settings = json.load(fh)
+    except:
+        settings = {}
+
+    # Save all simple attributes that might be defined on the launcher
+    settings.update(get_tagged_values(launcher, 'persist'))
+
+    # Now, handle the experiment-specific settings
+    es_settings = settings.setdefault('experiment', {})
+    for experiment in experiments:
+        t_settings = es_settings.setdefault(experiment.experiment_type, {})
+        e_settings = t_settings.setdefault(experiment.name, {})
+        for plugin in experiment.plugins:
+            p_settings = e_settings.setdefault(plugin.id, {})
+            p_settings['selected'] = plugin.selected
+
+    with path.open('w') as fh:
+        json.dump(settings, fh, indent=2)
+
+
+enamldef PluginPopup(PopupView): popup:
+    attr plugins
+    arrow_size = 20
+    VGroup:
+        Looper:
+            iterable << plugins[:]
+            CheckBox:
+                checked := loop_item.selected
+                text << loop_item.title
+                visible << not loop_item.required
+
+
+enamldef LauncherView(MainWindow): main:
+
+    attr launcher
+    title << 'Psiexperiment LBHB: ' + launcher.experiment_type
+    icon = main_icon
+
+    initialized ::
+        load_defaults(launcher, launcher.experiment_choices)
+
+    MenuBar:
+        Menu:
+            title = '&File'
+            Action:
+                text = 'Set as default\tCtrl+D'
+                triggered ::
+                    set_defaults(launcher, launcher.experiment_choices)
+        Menu:
+            title = '&Debug'
+            ActionGroup:
+                Looper:
+                    iterable = launcher.get_member('logging_level').items
+                    Action:
+                        checkable = True
+                        text = loop_item
+                        checked ::
+                            launcher.logging_level = loop_item
+                        checked << launcher.logging_level == loop_item
+
+    Container:
+
+        Form: config_form:
+            Label:
+                text = 'Hardware configuration'
+
+            ObjectCombo:
+                items << launcher.available_io[:]
+                selected := launcher.io
+
+            Label:
+                text = 'Experiment'
+
+            HGroup:
+                padding = 0
+                spacing = 0
+                align_widths = False
+
+                ObjectCombo: experiment:
+                    items << launcher.experiment_choices
+                    to_string = lambda x: x.title
+                    selected := launcher.experiment
+
+                PushButton:
+                    constraints = [width == 30]
+                    text = '⚙'
+                    visible << len([p for p in launcher.experiment.plugins if not p.required]) > 0
+                    clicked ::
+                        popup = PluginPopup(parent=self, plugins=launcher.experiment.plugins)
+                        popup.show()
+
+            Label: settings_label:
+                text = 'Settings'
+                vertical_align = 'top'
+
+            ObjectCombo: preferences:
+                constraints = [
+                    width == 300
+                ]
+                items << launcher.available_preferences[:]
+                to_string = lambda x: x.stem.replace('_', ' ')
+                selected := launcher.preferences
+
+            Label:
+                text = 'Save data?'
+
+            CheckBox: save:
+                checked := launcher.save_data
+
+            Label:
+                text = 'Experimenter'
+
+            ObjectCombo: experimenter:
+                items << launcher.available_experimenters[:]
+                selected := launcher.experimenter
+
+            Label:
+                text = 'Animal'
+
+            ObjectCombo: animal:
+                enabled << not launcher.use_prior_preferences
+                constraints = [
+                    width == 300
+                ]
+                items << launcher.available_animals[:]
+                selected := launcher.animal
+
+            Label:
+                text = 'Training'
+
+            ObjectCombo: training:
+                items << launcher.available_training
+                selected := launcher.training
+
+            Label:
+                text = 'Channel count'
+
+            Field: channelcount:
+                text := launcher.channelcount
+
+            Label:
+                text = 'SiteID'
+
+            Field: siteid:
+                text := launcher.siteid
+
+            Label:
+                text = 'Run #'
+
+            Field: runnumber:
+                text := launcher.runnumber
+
+            #Label:
+            #    text = 'Run Class'
+
+            #ObjectCombo: runclass:
+            #    items << launcher.available_runclasses
+            #    selected := launcher.runclass
+
+            Label:
+                text = 'Note'
+
+            Field: note:
+                text := launcher.note
+
+            Label:
+                text = 'Data folder'
+
+            HGroup:
+                padding = 0
+                align_widths = False
+
+                Label: base_folder:
+                    text << str(launcher.base_folder)
+
+        HGroup: button_bar:
+            leading_spacer = spacer(0)
+
+            PushButton: button:
+                text = 'Run experiment'
+                enabled << launcher.can_launch
+                clicked ::
+                    try:
+                        launcher.launch_subprocess()
+                    except Exception as e:
+                        critical(main, 'Error starting experiment', str(e))
