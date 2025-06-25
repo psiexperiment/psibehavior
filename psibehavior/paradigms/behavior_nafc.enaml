@@ -431,14 +431,25 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     pen_color = 'black'
                     label = 'Nose-poke (initiate)'
 
-        TimepointPlot:
-            source_name = 'sync_trigger_edges'
-            y = 2.5
-            color = 'red'
-            viewbox_name = 'IR_sensors'
+                TimepointPlot:
+                    source_name = 'sync_trigger_edges'
+                    y = 2.5
+                    color = 'red'
+                    viewbox_name = 'IR_sensors'
 
-        TimepointPlot:
-            source_name = 'loopback_ttl_edges'
-            y = 2.5
-            color = 'blue'
-            viewbox_name = 'IR_sensors'
+                TimepointPlot:
+                    source_name = 'loopback_ttl_edges'
+                    y = 2.5
+                    color = 'blue'
+                    viewbox_name = 'IR_sensors'
+
+            ViewBox:
+                name = 'signal'
+                y_label = 'Microphone signal'
+                y_min = -0.1
+                y_max = 0.1
+
+                ChannelPlot:
+                    source_name = 'microphone_1'
+                    pen_color = 'black'
+                    decimate_mode = 'none'

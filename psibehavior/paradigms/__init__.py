@@ -59,18 +59,15 @@ ParadigmDescription(
             'required': True
         },
 
-        # Monitoring of audio
         {
-            'manifest': PATH + 'monitor.SignalMonitor',
+            'manifest': 'psi.paradigms.core.signal_mixins.MultiSignalFFTViewManifest',
             'attrs': {
                 'sources': {
-                    'loopback_ttl': {'color': 'red'},
-                    'loopback_1': {'color': 'black'},
-                    'sync_trigger_in': {'color': 'green'},
-                }
-            },
+                    'microphone_1': {'color': 'black', 'apply_calibration': True},
+                },
             'required': True,
-        },
+            },
+        }
     ],
 )
 
