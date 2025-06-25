@@ -134,6 +134,8 @@ class Settings(Atom):
 
     def run_experiment(self, experiment, mode, save, autostart):
         cmd, env = self.build_experiment(experiment)
+        pprint.pprint(env)
+        print(' '.join(cmd))
         self.process_manager.add_command(cmd, env)
         self.process_manager.open_next_subprocess()
 
