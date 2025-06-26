@@ -5,10 +5,13 @@ import pprint
 from atom.api import Atom, Dict, Enum, Int, List, Str, Typed, Value
 from enaml.core.api import Looper
 from enaml.layout.api import align, hbox, spacer, vbox
+from enaml.stdlib.message_box import critical
 from enaml.widgets.api import (
     Action, CheckBox, Container, GroupBox, Field, FileDialogEx, Label,
     MainWindow, Menu, MenuBar, ObjectCombo, PopupView, PushButton,
 )
+
+from psi import get_config
 
 from cftscal.api import (
     generic_microphone_manager,
@@ -29,6 +32,9 @@ from psiapp.api import(
     load_experiments, AddRemoveCombo, Experiment, ExperimentSequence,
     ProcessManager,
 )
+
+
+DATA_ROOT = Path(get_config('DATA_ROOT'))
 
 
 class Settings(Atom):
@@ -133,13 +139,13 @@ class Settings(Atom):
                 raise
 
     def run_experiment(self, experiment, mode, save, autostart):
-        cmd, env = self.build_experiment(experiment)
+        cmd, env = self.build_experiment(experiment, mode, save)
         pprint.pprint(env)
         print(' '.join(cmd))
         self.process_manager.add_command(cmd, env)
         self.process_manager.open_next_subprocess()
 
-    def build_experiment(self, experiment, save=True):
+    def build_experiment(self, experiment, mode, save=True):
         env = {
             'WEBSOCKETS_URI': self.process_manager.ws_server.connected_uri,
         }
@@ -151,7 +157,10 @@ class Settings(Atom):
         args = ['psi', experiment.paradigm.full_name]
         if save:
             # TODO
-            pass
+            mode_note = experiment.mode_notes.get(mode, '')
+            filename = f'{{date_time}} {self.experimenter} {self.animal} {self.note} {self.standard_note} {mode_note} {experiment.paradigm.name}'
+            filename = ' '.join(filename.split())
+            args.append(str(DATA_ROOT / filename))
 
         if experiment.preference:
             args.extend(['--preferences', experiment.preference])
