@@ -39,6 +39,9 @@ ParadigmDescription(
     'tinnitus-2AFC', 'Tinnitus (2AFC with silence)', 'animal',
     COMMON_PLUGINS + [
         {'manifest': PATH + 'behavior_nafc.BehaviorManifest', 'attrs': {'N_response': 2, 'N_output': 1}},
+        {'manifest': PATH + 'trial_manager.TrialManagerManifest',
+         'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.Tinnitus2AFCManager'},
+        },
 
         # Reward dispensers
         {

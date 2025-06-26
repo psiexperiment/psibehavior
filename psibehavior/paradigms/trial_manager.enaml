@@ -1,0 +1,38 @@
+from functools import partial
+import importlib
+
+from enaml.workbench.api import Extension
+from enaml.workbench.core.api import Command
+
+from psi.controller.api import ExperimentAction
+from psi.core.enaml.api import ExperimentManifest
+
+
+def configure_manager(manifest, event):
+    controller = event.workbench.get_plugin('psi.controller')
+    module_path, class_name = manifest.manager_path.rsplit('.', 1)
+    module = importlib.import_module(module_path)
+    manager_class = getattr(module, class_name)
+    controller.trial_manager = manager_class(controller)
+
+
+enamldef TrialManagerManifest(ExperimentManifest): manifest:
+
+    id = manifest.manager_path
+    attr manager_path
+    required = True
+
+    Extension:
+        id = manifest.id + '.behavior_commands'
+        point = 'enaml.workbench.core.commands'
+        Command:
+            id = manifest.id + '.configure_manager'
+            handler = partial(configure_manager, manifest)
+
+    Extension:
+        id = manifest.id + '.events'
+        point = 'psi.controller.actions'
+
+        ExperimentAction:
+            event = 'experiment_prepare'
+            command = manifest.id + '.configure_manager'

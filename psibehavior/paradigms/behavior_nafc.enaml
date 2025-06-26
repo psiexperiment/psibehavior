@@ -31,7 +31,13 @@ def get_status(trial, trial_state, experiment_state, side):
     elif experiment_state == 'stopped':
         return 'Experiment complete'
     state = '' if trial_state is None else trial_state.value
-    return 'Trial {} - {} (respond on {})'.format(trial, state, side)
+    if side == 0:
+        side_string = 'either side'
+    else:
+        side_string = f'side {side + 1}'
+
+    side_string = str(side + 1)
+    return f'Trial {trial} - {state} (respond on {side_string})'
 
 
 def process_et(event):
@@ -154,18 +160,11 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             name = 'trial_ready'
 
         ExperimentAction:
-            # This schedules a TTL pulse to be sent via the channel linked to
-            # the sync_trigger output. The TTL pulse will start at the exact
-            # same time as target_start and last for 0.5 sec. Whenever an
-            # ExperimentAction is triggered, kwargs will automatically include
-            # the event name (in this case, "target_start") and the timestamp
-            # the event occurred (this is how the sync_trigger.trigger command
-            # knows when to schedule the trigger to begin). If the event was
-            # hardware-timed, then the timestamp will be accurate down to the
-            # sample).
-            event = 'output_1_start'
-            command = 'sync_trigger.trigger'
-            kwargs = {'duration': 0.5}
+            # This fires a trigger that starts connected devices (e.g., NI
+            # cards).
+            event = 'engines_configured'
+            command = 'start_trigger_out.trigger'
+            kwargs = {'duration': 0.1}
 
         Looper:
             # Set up the actions and events for each response that the animal
@@ -203,6 +202,11 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     Extension:
         id = manifest.id + '.data'
         point = 'psi.data.sinks'
+        BinaryStore:
+            name = 'soundcard_data'
+            # Save the loopbacks
+            continuous_inputs = ['loopback_ttl', 'loopback_1', 'sync_trigger_in']
+
         BinaryStore:
             # Make sure we save all the behavior data (IR sensors and
             name = 'behavior_data'
@@ -439,17 +443,17 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
 
                 TimepointPlot:
                     source_name = 'loopback_ttl_edges'
-                    y = 2.5
+                    y = 2.25
                     color = 'blue'
                     viewbox_name = 'IR_sensors'
 
             ViewBox:
                 name = 'signal'
-                y_label = 'Microphone signal'
+                y_label = 'Loopback Signal'
                 y_min = -0.1
                 y_max = 0.1
 
                 ChannelPlot:
-                    source_name = 'microphone_1'
+                    source_name = 'loopback_1'
                     pen_color = 'black'
                     decimate_mode = 'none'

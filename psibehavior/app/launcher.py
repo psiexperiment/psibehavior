@@ -33,6 +33,7 @@ from psilbhb.util.plots import plot_behavior
 #from psi.application.base_launcher import SimpleLauncher, launch main_animal
 plt.ion()
 
+
 class SimpleLauncher(Atom):
 
     io = Value()

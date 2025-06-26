@@ -10,6 +10,7 @@ import numpy as np
 
 #from psilbhb.stim.wav_set import WavSet
 from .behavior_mixins import (BaseBehaviorPlugin, TrialState)
+from .trial_manager_plugin import BaseTrialManager
 
 ################################################################################
 # Supporting
@@ -62,8 +63,8 @@ class NAFCEvent(enum.Enum):
         # triggered by the user via the GUI (True) or by the animal (False).
         NAFCEvent[f'resp_{i+1}_start'] = ('response', 'start', i+1, False)
         NAFCEvent[f'resp_{i+1}_end'] = ('response', 'end', i+1, False)
-        NAFCEvent[f'digital_resp{i+1}_start'] = ('response', 'start', i+1, True)
-        NAFCEvent[f'digital_resp{i+1}_end'] = ('response', 'end', i+1, True)
+        NAFCEvent[f'digital_resp_{i+1}_start'] = ('response', 'start', i+1, True)
+        NAFCEvent[f'digital_resp_{i+1}_end'] = ('response', 'end', i+1, True)
 
     # Same rules apply as above, but for the nose-poke port.
     np_start = ('np', 'start', False, 0, False)
@@ -82,18 +83,6 @@ class NAFCEvent(enum.Enum):
 
     trial_start = ('trial', 'start')
     trial_end = ('trial', 'end')
-
-
-from psiaudio import stim
-
-
-class TrialManager:
-
-    def next_trial(self):
-        pass
-
-    def get_waveform(self, fs):
-        return stim.ramped_tone(fs, 1e3, 0.01, 1, 0.25)
 
 
 ################################################################################
@@ -137,7 +126,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
     np_active = Bool(False)
 
     #: Trial object
-    trial_manager = Typed(TrialManager)
+    trial_manager = Typed(BaseTrialManager)
 
     def handle_event(self, event, timestamp=None):
         if event in (NAFCEvent.np_start, NAFCEvent.digital_np_start):
@@ -162,14 +151,11 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             ('falling', 'np_contact'): NAFCEvent.np_end,
         }
         for i in range(self.N_response):
-            event_map['rising', f'{response_name}_contact_{i+1}'] = \
-                getattr(NAFCEvent, f'response_{i+1}_start')
-            event_map['falling', f'{response_name}_contact_{i+1}'] = \
-                getattr(NAFCEvent, f'response_{i+1}_end')
+            event_map['rising', f'{self.response_name}_contact_{i+1}'] = \
+                getattr(NAFCEvent, f'resp_{i+1}_start')
+            event_map['falling', f'{self.response_name}_contact_{i+1}'] = \
+                getattr(NAFCEvent, f'resp_{i+1}_end')
         return event_map
-
-    def _default_trial_manager(self):
-        return TrialManager()
 
     def can_modify(self):
         return self.trial_state in (
@@ -198,11 +184,10 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         }
         self.trial_state = NAFCTrialState.waiting_for_trial_start
 
-        self._prepare_trial()
+        self.trial_manager.prepare_trial()
 
         # Now trigger any callbacks that are listening for the trial_ready
         # event.
-        log.info('Detected nose poke state is %r', self.np_active)
         self.invoke_actions('trial_ready')
         if auto_start:
             self.start_trial()
@@ -213,13 +198,6 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.start_trial()
         else:
             self.trial_state = NAFCTrialState.waiting_for_np_start
-
-    def _prepare_trial(self):
-        o = self.get_output('output_1')
-        w = self.trial_manager.get_waveform(o.fs)
-        with o.engine.lock:
-            o.set_waveform(w)
-        self.side = 1
 
     def handle_waiting_for_trial_start(self, event, timestamp):
         pass
@@ -251,27 +229,22 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         # This is broken into a separate method from
         # handle_waiting_for_np_duration to allow us to trigger this method
         # from a toolbar button for training purposes.
-        ts = self._start_trial(target_delay)
+        ts = self.trial_manager.start_trial(target_delay)
         self.invoke_actions('trial_start', ts)
+        self.trial_info['trial_start'] = ts
         # Notify the state machine that we are now in the hold phase of trial.
         # This means that the next time any event occurs (e.g., such as one
         # detected on the digital lines), it will call
         # `handle_waiting_for_hold` with the event and timestamp the event
         # occurred at.
-        self.advance_state('hold', ts)
-        self.trial_info['trial_start'] = ts
 
-    def _start_trial(self, target_delay):
-        o1 = self.get_output('output_1')
-        #o2 = self.get_output('output_2')
-        st = self.get_output('sync_trigger_out')
-        with o1.engine.lock:
-            ts = self.get_ts()
-            log.error('Timestamp is %f', ts)
-            o1.start_waveform(ts + target_delay)
-            #o2.start_waveform(ts + target_delay, True)
-            st.trigger(ts + target_delay, 0.5)
-        return ts
+        # First, check to see if we expect the animal to hold the nose-poke for
+        # a certain duration. If not, then go straight to the response phase.
+        hold_duration = self.context.get_value('hold_duration')
+        if hold_duration != 0:
+            self.advance_state('hold', ts)
+        else:
+            self.advance_state('response', ts)
 
     def handle_waiting_for_hold(self, event, timestamp):
         if event.value[:2] == ('np', 'end'):
@@ -348,6 +321,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         })
         self.trial_info.update(self.context.get_values())
         self.invoke_actions('trial_end', ts, kw={'result': self.trial_info.copy()})
+        self.trial_manager.trial_complete(response, score, self.trial_info)
 
         if score == NAFCTrialScore.incorrect:
             # Call timeout actions and then wait for animal to withdraw from
