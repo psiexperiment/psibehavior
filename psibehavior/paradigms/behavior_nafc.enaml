@@ -19,25 +19,7 @@ from psi.experiment.api import StatusItem
 from psi.data.plots import (TimeContainer, TimepointPlot, ChannelPlot, ViewBox)
 from psi.data.sinks.api import BinaryStore
 
-from .behavior_nafc_plugin import BehaviorPlugin, NAFCEvent
-
-
-def get_status(trial, trial_state, experiment_state, side):
-    # Experiment not running
-    if experiment_state == 'paused':
-        return 'Experiment paused'
-    elif experiment_state == 'initialized':
-        return 'Waiting to start'
-    elif experiment_state == 'stopped':
-        return 'Experiment complete'
-    state = '' if trial_state is None else trial_state.value
-    if side == 0:
-        side_string = 'either side'
-    else:
-        side_string = f'side {side + 1}'
-
-    side_string = str(side + 1)
-    return f'Trial {trial} - {state} (respond on {side_string})'
+from .behavior_nafc_plugin import BehaviorPlugin
 
 
 def process_et(event):
@@ -66,6 +48,17 @@ def check_microphones(workbench, manifest):
     data._refresh_plots()
 
 
+def get_current_state(experiment_state, trial_state):
+    if experiment_state == 'paused':
+        return 'Experiment paused'
+    elif experiment_state == 'initialized':
+        return 'Waiting to start'
+    elif experiment_state == 'stopped':
+        return 'Experiment complete'
+    else:
+        return trial_state.value.capitalize()
+
+
 enamldef BehaviorManifest(ControllerManifest): manifest:
     '''
     Defines the core settings that any behavior experiment may require. Does
@@ -79,7 +72,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     initialized ::
         deferred_call(check_microphones, workbench, manifest)
 
-    # Not to be populated manually?
+    # Not to be populated manually (e.g., see `check_microphones`)?
     attr input_list = []
 
     #: Sets the name of the response inputs (e.g., `spout`, etc.). This is
@@ -106,14 +99,15 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
         point = 'psi.experiment.status'
 
         StatusItem:
-            label = 'Experiment state'
+            label = 'Trial Info'
             Label:
-                text << get_status(
-                    workbench.get_plugin('psi.controller').trial,
-                    workbench.get_plugin('psi.controller').trial_state,
-                    workbench.get_plugin('psi.controller').experiment_state,
-                    workbench.get_plugin('psi.controller').side,
-                )
+                text << workbench.get_plugin('psi.controller').trial_state_str
+
+        StatusItem:
+            label = 'Current State'
+            Label:
+                attr controller = workbench.get_plugin('psi.controller')
+                text << get_current_state(controller.experiment_state, controller.trial_state)
 
     Extension:
         id = manifest.id + '.behavior_commands'
@@ -270,6 +264,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 compact_label = 'repeat_incorrect'
                 default = 'Yes'
                 choices = {'No': 0, 'Early only': 1, 'Yes': 2}
+                scope = 'arbitrary'
             Parameter:
                 name = 'iti_duration'
                 label = 'Intertrial interval (s)'
@@ -366,9 +361,9 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 checkable = True
                 toggled ::
                     if checked:
-                        controller.handle_event(NAFCEvent.digital_np_start)
+                        controller.handle_event(controller.events.digital_np_start)
                     else:
-                        controller.handle_event(NAFCEvent.digital_np_end)
+                        controller.handle_event(controller.events.digital_np_end)
                 enabled << controller.experiment_state not in ('initialized', 'stopped')
             Looper:
                 iterable = range(N_response)
@@ -377,9 +372,9 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     checkable = True
                     toggled ::
                         if checked:
-                            event = getattr(NAFCEvent, f'digital_{response_name}_{loop_item+1}_start')
+                            event = getattr(controller.events, f'digital_{response_name}_{loop_item+1}_start')
                         else:
-                            event = getattr(NAFCEvent, f'digital_{response_name}_{loop_item+1}_end')
+                            event = getattr(controller.events, f'digital_{response_name}_{loop_item+1}_end')
                         controller.handle_event(event)
                     enabled << controller.experiment_state not in ('initialized', 'stopped')
             Action:

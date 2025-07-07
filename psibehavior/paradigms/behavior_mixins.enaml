@@ -22,37 +22,6 @@ class TrialState(enum.Enum):
     pass
 
 
-class TrialType(enum.Enum):
-    pass
-
-
-def get_status(trial, trial_type, trial_state, experiment_state):
-    # Experiment not running
-    if experiment_state == 'paused':
-        return 'Experiment paused'
-    elif experiment_state == 'initialized':
-        return 'Waiting to start'
-    elif experiment_state == 'stopped':
-        return 'Experiment complete'
-
-    state = '' if trial_state is None else trial_state.value
-
-    # Experiment running
-    if '_' in trial_type.value:
-        general, specific = trial_type.value.split('_', 1)
-        label = '{} ({})'.format(general, specific.replace('_', ' '))
-    else:
-        label = trial_type.value
-    return 'Trial {} {} - {}'.format(trial, label, state)
-
-
-def get_state(trial_state):
-    if trial_state is None:
-        return ''
-    else:
-        return trial_state.value.capitalize()
-
-
 def process_et(event):
     plugin = event.workbench.get_plugin('psi.controller')
     name = event.parameters['name']
@@ -78,27 +47,12 @@ class BaseBehaviorPlugin(ControllerPlugin):
     #: Has a remind trial been requested?
     _remind_requested = Bool(False)
 
-    #: Current trial number
-    trial = Int(0)
-
-    #: Type of trial (e.g., go, nogo, go_remind, nogo_repeat, etc.)
-    trial_type = Typed(TrialType)
-
-    #: What was the result of the prior trial? This is used in the event that
-    #: the next trial depends on the previous one.
-    prior_score = Value()
-
     #: Info about the trial that will get saved to the trial log
     trial_info = Typed(dict, ())
 
     #: Current state of the trial (see BaseGoNogoTrialState for some possible
     #: states).
     trial_state = Typed(TrialState)
-
-    def get_event_info(self):
-        return {
-            'trial': self.trial
-        }
 
     def can_modify(self):
         return True
@@ -125,6 +79,7 @@ class BaseBehaviorPlugin(ControllerPlugin):
             log.info('Applying changes')
             self.context.apply_changes()
             self.context.next_setting()
+            self.prepare_trial()
             self._apply_requested = False
             return True
         return False
