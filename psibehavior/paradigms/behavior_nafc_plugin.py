@@ -326,12 +326,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         elif score == NAFCTrialScore.invalid:
             # Early withdraw from nose-poke
             # want to stop sound and start TO
-            o1 = self.get_output('output_1')
-            #o2 = self.get_output('output_2')
-            with o1.engine.lock:
-                ts = self.get_ts()
-                o1.stop_waveform(ts + 0.1)
-             #   o2.stop_waveform(ts + 0.1, True)
+            self.trial_manager.end_trial()
             self.advance_state('to', ts)
         elif (score == NAFCTrialScore.correct) and \
             response.startswith(self.response_name):
@@ -341,10 +336,6 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.start_wait_for_reward_end(ts, 'iti')
         else:
             self.advance_state('iti', ts)
-
-        #self.wavset.score_response(score.value,
-        #                           repeat_incorrect=self.context.get_value('repeat_incorrect'),
-        #                           trial_idx=self.trial)
 
         # Apply pending changes that way any parameters (such as repeat_FA or
         # go_probability) are reflected in determining the next trial type.

@@ -100,6 +100,7 @@ class Tinnitus2AFCManager(BaseTrialManager):
         with self.output.engine.lock:
             self.output.set_waveform(self.waveforms[self.current_trial])
         self.controller.side = self.stim_config[self.current_trial]['side']
+        self.controller.context.set_value('trial_type', self.current_trial)
 
     def start_trial(self, delay):
         with self.output.engine.lock:
@@ -110,7 +111,7 @@ class Tinnitus2AFCManager(BaseTrialManager):
 
     def end_trial(self, delay=0):
         with self.output.engine.lock:
-            ts = self.get_ts()
+            ts = self.controller.get_ts()
             self.output.stop_waveform(ts + delay)
 
     def trial_complete(self, response, score, info):
