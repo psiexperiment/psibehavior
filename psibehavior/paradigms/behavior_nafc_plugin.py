@@ -166,12 +166,6 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             NAFCTrialState.waiting_for_reward_end,
         )
 
-    def apply_changes(self):
-        if self.can_modify():
-            self._apply_changes()
-            return True
-        return False
-
     def prepare_trial(self, auto_start=False):
         log.info('Preparing for next trial (auto_start %r)', auto_start)
         # Figure out next trial and set up selector.
