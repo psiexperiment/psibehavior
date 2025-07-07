@@ -9,7 +9,7 @@ from enaml.core.api import d_
 import numpy as np
 
 #from psilbhb.stim.wav_set import WavSet
-from .behavior_mixins import (BaseBehaviorPlugin, TrialState)
+from .base_behavior_plugin import (BaseBehaviorPlugin, TrialState)
 from .trial_manager_plugin import BaseTrialManager
 
 ################################################################################
