@@ -14,7 +14,6 @@ from psi.controller.api import (ControllerManifest, ControllerPlugin,
                                 ExperimentEvent,
                                 ExperimentState)
 
-from psi.data.sinks.api import EventLog, SDTAnalysis, TrialLog
 from psi.util import rpc
 
 
@@ -90,7 +89,7 @@ class BaseBehaviorPlugin(ControllerPlugin):
             self.prepare_trial(auto_start=True)
 
     def et_callback(self, name, edge, event_time):
-        log.debug('Detected {} on {} at {}'.format(edge, name, event_time))
+        #log.debug('Detected {} on {} at {}'.format(edge, name, event_time))
         event = self.event_map[edge, name]
         self.handle_event(event, event_time)
 
@@ -118,7 +117,6 @@ class BaseBehaviorPlugin(ControllerPlugin):
 
         # May need to wrap this in a lock, but let's hold off and see if this
         # is needed.
-        log.debug('Recieved handle_event signal for {}'.format(event.name))
         self.invoke_actions(event.name, timestamp)
         if self.experiment_state == 'paused':
             # If the experiment is paused, don't do anything.

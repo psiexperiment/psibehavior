@@ -49,7 +49,7 @@ class BaseNAFCEvent(enum.Enum):
     experiment.
     '''
     @property
-    def name(self):
+    def category(self):
         return self.value[0]
 
     @property
@@ -234,7 +234,10 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         pass
 
     def handle_waiting_for_np_start(self, event, timestamp):
-        if event.name == 'np' and event.phase == 'start':
+        if self.experiment_state != 'running':
+            return
+
+        if event.category == 'np' and event.phase == 'start':
             # Animal has nose-poked in an attempt to initiate a trial.
             self.trial_state = NAFCTrialState.waiting_for_np_duration
             self.start_event_timer('np_duration', self.events.np_duration_elapsed)
@@ -243,14 +246,14 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.trial_info['np_start'] = timestamp
 
     def handle_waiting_for_np_duration(self, event, timestamp):
-        if event.name == 'np' and event.phase == 'end':
+        if event.category == 'np' and event.phase == 'end':
             # Animal has withdrawn from nose-poke too early. Cancel the timer
             # so that it does not fire a 'event_np_duration_elapsed'.
             log.debug('Animal withdrew too early')
             self.stop_event_timer()
             self.trial_state = NAFCTrialState.waiting_for_np_start
             del self.trial_info['np_start']
-        elif event.value[:2] == ('np', 'elapsed'):
+        elif event.category == 'np' and event.phase == 'elapsed':
             log.debug('Animal initiated trial')
             self.start_trial()
 
@@ -278,7 +281,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.advance_state('response', ts)
 
     def handle_waiting_for_hold(self, event, timestamp):
-        if event.name == 'np' and event.phase == 'end':
+        if event.category == 'np' and event.phase == 'end':
             self.invoke_actions('response_end', timestamp)
             self.trial_info['response_ts'] = timestamp
             self.trial_info['response_side'] = np.nan
@@ -303,13 +306,13 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             # the nose port or no response will be scored as a "no" response
             # (i.e., the subject did not hear the target). A response at the
             # single response input will be socred as a "yes" response.
-            if event.name == 'np' and event.phase == 'start':
+            if event.category == 'np' and event.phase == 'start':
                 self.trial_info['response_ts'] = timestamp
                 self.trial_info['response_side'] = 0
                 score = self.scores.correct if self.response_condition == 0 else self.scores.incorrect
                 response = 'np'
                 self.end_trial(response, score)
-            elif event.name == 'response' and event.phase == 'elapsed':
+            elif event.category == 'response' and event.phase == 'elapsed':
                 self.trial_info['response_ts'] = np.nan
                 self.trial_info['response_side'] = np.nan
                 score = self.scores.correct if self.response_condition == 0 else self.scores.incorrect
@@ -317,7 +320,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
                 self.end_trial(response, score)
         else:
             # This is the NAFC section of the scoring.
-            if event.name == 'response' and event.phase == 'start':
+            if event.category == 'response' and event.phase == 'start':
                 self.invoke_actions('response_end', timestamp)
                 self.trial_info['response_ts'] = timestamp
                 self.trial_info['response_side'] = event.side
@@ -359,30 +362,26 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         self.invoke_actions('trial_end', ts, kw={'result': self.trial_info.copy()})
         self.trial_manager.trial_complete(response, score, self.trial_info)
 
-        if score == self.scores.incorrect:
-            # Call timeout actions and then wait for animal to withdraw from
-            # response port.
-            self.advance_state('to', ts)
-            if response.startswith(self.response_name):
-                self.start_wait_for_reward_end(ts, 'to')
-        elif score == self.scores.invalid:
-            # Early withdraw from nose-poke
-            # want to stop sound and start TO
+        if score == self.scores.invalid:
+            # Early withdraw from nose-poke want to stop sound
             self.trial_manager.end_trial()
-            self.advance_state('to', ts)
-        elif (score == self.scores.correct) and \
-            response.startswith(self.response_name):
-            # If the correct response is not a nose-poke, then this means that
-            # the animal will still be on the response port. Need to wait for
-            # animal to withdraw before continuing with the trial.
-            self.start_wait_for_reward_end(ts, 'iti')
+
+        if score in (self.scores.incorrect, self.scores.invalid):
+            to_duration = self.context.get_value('to_duration')
+            next_state = 'to' if to_duration != 0 else 'iti'
         else:
-            self.advance_state('iti', ts)
+            next_state = 'iti'
+
+        # Check if animal is at reward hopper
+        if response.startswith(self.response_name):
+            self.start_wait_for_reward_end(ts, next_state)
+        else:
+            self.advance_state(next_state, ts)
 
         # Apply pending changes that way any parameters (such as repeat_FA or
         # go_probability) are reflected in determining the next trial type.
         if self._apply_requested:
-            self._apply_changes(False)
+            self.apply_changes()
 
     def advance_state(self, state, timestamp):
         log.info(f'Advancing to {state}')
@@ -396,7 +395,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         self.next_trial_state = next_state
 
     def handle_waiting_for_reward_end(self, event, timestamp):
-        if event.name == 'response' and event.phase == 'end':
+        if event.category == 'response' and event.phase == 'end':
             self.advance_state(self.next_trial_state, timestamp)
 
     def handle_waiting_for_to(self, event, timestamp):
@@ -404,14 +403,14 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             # Turn the light back on
             self.invoke_actions('to_end', timestamp)
             self.advance_state('iti', timestamp)
-        elif event.name == 'response' and event.phase == 'start':
+        elif event.category == 'response' and event.phase == 'start':
             # Cancel timeout timer and wait for animal to disconnect from
             # response port.
             self.stop_event_timer()
             self.start_wait_for_reward_end(timestamp, 'to')
 
     def handle_waiting_for_iti(self, event, timestamp):
-        if event.name == 'response' and event.phase == 'start':
+        if event.category == 'response' and event.phase == 'start':
             # Animal attempted to get reward. Reset ITI interval.
             self.stop_event_timer()
             self.start_wait_for_reward_end(timestamp, 'iti')
@@ -420,6 +419,8 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             if self._pause_requested:
                 self.pause_experiment()
                 self.trial_state = NAFCTrialState.waiting_for_resume
+            elif self.experiment_state != 'running':
+                pass
             else:
                 self.prepare_trial()
 

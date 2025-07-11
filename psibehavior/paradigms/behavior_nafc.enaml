@@ -211,7 +211,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             # Exclude the IR contact detection events since these are numerous
             # and messy.
             show_widget = True
-            exclude = ['*contact*digital_acquired*']
+            exclude = ['*contact*digital_acquired*', 'trial_ready']
 
         TrialLog:
             show_widget = True
@@ -429,6 +429,12 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     source_name = 'np_contact_analog'
                     pen_color = 'black'
                     label = 'Nose-poke (initiate)'
+
+                TimepointPlot:
+                    source_name = 'np_contact_digital'
+                    y = 2.5
+                    color = 'gray'
+                    viewbox_name = 'IR_sensors'
 
                 TimepointPlot:
                     source_name = 'sync_trigger_edges'

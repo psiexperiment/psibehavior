@@ -4,8 +4,14 @@ import importlib
 from enaml.workbench.api import Extension
 from enaml.workbench.core.api import Command
 
+from psi.context import api as context_api
 from psi.controller.api import ExperimentAction
 from psi.core.enaml.api import ExperimentManifest
+
+
+# Cache the context items. This ensures that the class instance IDs do not
+# change if the factory function is called multiple times.
+CONTEXT_ITEM_CACHE = {}
 
 
 def configure_manager(manifest, event):
@@ -13,7 +19,41 @@ def configure_manager(manifest, event):
     module_path, class_name = manifest.manager_path.rsplit('.', 1)
     module = importlib.import_module(module_path)
     manager_class = getattr(module, class_name)
+
     controller.trial_manager = manager_class(controller)
+
+
+def generate_context_items(manifest, workbench):
+    # This assumes that the list of params have not changed.
+    if manifest in CONTEXT_ITEM_CACHE:
+        return CONTEXT_ITEM_CACHE[manifest]
+
+    module_path, class_name = manifest.manager_path.rsplit('.', 1)
+    module = importlib.import_module(module_path)
+    manager_class = getattr(module, class_name)
+
+    context_group_names = set()
+    context_items = []
+    prefix = manifest.prefix
+
+    for entry in manager_class.default_parameters:
+        entry = entry.copy()
+        context_group_names.add(prefix + entry['group_name'])
+        klass_name = entry.pop('type', 'Parameter')
+        klass = getattr(context_api, klass_name)
+        entry['name'] = prefix + entry['name']
+        entry['group_name'] = prefix + entry['group_name']
+        item = klass(**entry)
+        # See https://enaml.readthedocs.io/en/latest/api_ref/core/declarative.html
+        item.initialize()
+        context_items.append(item)
+
+    for group_name in context_group_names:
+        context_items.append(context_api.ContextGroup(name=group_name))
+
+    CONTEXT_ITEM_CACHE[manifest] = context_items
+
+    return context_items
 
 
 enamldef TrialManagerManifest(ExperimentManifest): manifest:
@@ -21,6 +61,9 @@ enamldef TrialManagerManifest(ExperimentManifest): manifest:
     id = manifest.manager_path
     attr manager_path
     required = True
+
+    #: Prefix to add to names that will be shown in GUI.
+    attr prefix = ''
 
     Extension:
         id = manifest.id + '.behavior_commands'
@@ -36,3 +79,8 @@ enamldef TrialManagerManifest(ExperimentManifest): manifest:
         ExperimentAction:
             event = 'experiment_prepare'
             command = manifest.id + '.configure_manager'
+
+    Extension:
+        id = manifest.id + '.items'
+        point = 'psi.context.items'
+        factory = partial(generate_context_items, manifest, workbench)
