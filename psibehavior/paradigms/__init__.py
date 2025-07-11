@@ -68,9 +68,10 @@ ParadigmDescription(
                 'sources': {
                     'microphone_1': {'color': 'black', 'apply_calibration': True},
                 },
-            'required': True,
+                'fft_freq_lb': 1e3,
             },
-        }
+            'required': True,
+        },
     ],
 )
 
