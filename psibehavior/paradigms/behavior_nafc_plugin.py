@@ -74,10 +74,6 @@ class BehaviorPlugin(BaseBehaviorPlugin):
     Eventually this should become generic enough that it can be used with
     aversive experiments as well (it may already be sufficiently generic).
     '''
-
-    #: Used by the trial sequence selector to randomly select between go/nogo.
-    rng = Typed(np.random.RandomState)
-
     #: True if the user is controlling when the trials begin (e.g., in
     #: training).
     manual_control = d_(Bool(), writable=False)
@@ -174,11 +170,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         super().handle_event(event, timestamp)
 
     def request_trial(self):
-        log.info('Requesting trial')
         self.prepare_trial(auto_start=True)
-
-    def _default_rng(self):
-        return np.random.RandomState()
 
     def _default_trial_state(self):
         return NAFCTrialState.waiting_for_resume
@@ -235,6 +227,8 @@ class BehaviorPlugin(BaseBehaviorPlugin):
 
     def handle_waiting_for_np_start(self, event, timestamp):
         if self.experiment_state != 'running':
+            return
+        if self.manual_control:
             return
 
         if event.category == 'np' and event.phase == 'start':
@@ -310,13 +304,19 @@ class BehaviorPlugin(BaseBehaviorPlugin):
                 self.trial_info['response_ts'] = timestamp
                 self.trial_info['response_side'] = 0
                 score = self.scores.correct if self.response_condition == 0 else self.scores.incorrect
-                response = 'np'
+                response = event.category
                 self.end_trial(response, score)
             elif event.category == 'response' and event.phase == 'elapsed':
                 self.trial_info['response_ts'] = np.nan
                 self.trial_info['response_side'] = np.nan
                 score = self.scores.correct if self.response_condition == 0 else self.scores.incorrect
                 response = 'no_response'
+                self.end_trial(response, score)
+            elif event.category == 'response' and event.phase == 'start':
+                self.trial_info['response_ts'] = timestamp
+                self.trial_info['response_side'] = event.side
+                score = self.scores.correct if self.response_condition == 1 else self.scores.incorrect
+                response = f'{event.category}_{event.side}'
                 self.end_trial(response, score)
         else:
             # This is the NAFC section of the scoring.
@@ -354,7 +354,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         response_time = self.trial_info['response_ts']-self.trial_info['trial_start']
         self.trial_info.update({
             'response': response,
-            'score': score.value,
+            'score': score.name,
             'correct': score == self.scores.correct,
             'response_time': response_time,
         })
@@ -367,16 +367,25 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.trial_manager.end_trial()
 
         if score in (self.scores.incorrect, self.scores.invalid):
-            to_duration = self.context.get_value('to_duration')
-            next_state = 'to' if to_duration != 0 else 'iti'
+            if self.context.get_value('to_duration') > 0:
+                next_state = 'to'
+            else:
+                next_state = 'iti'
         else:
             next_state = 'iti'
 
+        if next_state == 'to':
+            self.invoke_actions('to_start')
+
         # Check if animal is at reward hopper
         if response.startswith(self.response_name):
-            self.start_wait_for_reward_end(ts, next_state)
+            self.trial_state = NAFCTrialState.waiting_for_reward_end
+            self.next_trial_state = next_state
+        elif next_state == 'to':
+            self.start_event_timer(f'to_duration', self.events.to_duration_elapsed)
+            self.trial_state = NAFCTrialState.waiting_for_to
         else:
-            self.advance_state(next_state, ts)
+            self.advance_state('iti', ts)
 
         # Apply pending changes that way any parameters (such as repeat_FA or
         # go_probability) are reflected in determining the next trial type.
@@ -386,34 +395,35 @@ class BehaviorPlugin(BaseBehaviorPlugin):
     def advance_state(self, state, timestamp):
         log.info(f'Advancing to {state}')
         self.trial_state = getattr(NAFCTrialState, f'waiting_for_{state}')
-        self.invoke_actions(f'{state}_start', timestamp)
         elapsed_event = getattr(self.events, f'{state}_duration_elapsed')
         self.start_event_timer(f'{state}_duration', elapsed_event)
 
-    def start_wait_for_reward_end(self, timestamp, next_state):
-        self.trial_state = NAFCTrialState.waiting_for_reward_end
-        self.next_trial_state = next_state
-
     def handle_waiting_for_reward_end(self, event, timestamp):
         if event.category == 'response' and event.phase == 'end':
-            self.advance_state(self.next_trial_state, timestamp)
+            if self.next_trial_state == 'to':
+                self.start_event_timer(f'to_duration', self.events.to_duration_elapsed)
+                self.trial_state = NAFCTrialState.waiting_for_to
+            elif self.next_trial_state == 'iti':
+                self.advance_state('iti', timestamp)
 
     def handle_waiting_for_to(self, event, timestamp):
         if event == self.events.to_duration_elapsed:
-            # Turn the light back on
+            # Process end of timeout (e.g., turn lights back on).
             self.invoke_actions('to_end', timestamp)
             self.advance_state('iti', timestamp)
         elif event.category == 'response' and event.phase == 'start':
             # Cancel timeout timer and wait for animal to disconnect from
             # response port.
             self.stop_event_timer()
-            self.start_wait_for_reward_end(timestamp, 'to')
+            self.next_trial_state = 'to'
+            self.trial_state = NAFCTrialState.waiting_for_reward_end
 
     def handle_waiting_for_iti(self, event, timestamp):
         if event.category == 'response' and event.phase == 'start':
             # Animal attempted to get reward. Reset ITI interval.
             self.stop_event_timer()
-            self.start_wait_for_reward_end(timestamp, 'iti')
+            self.next_trial_state = 'iti'
+            self.trial_state = NAFCTrialState.waiting_for_reward_end
         elif event == self.events.iti_duration_elapsed:
             self.invoke_actions(self.events.iti_end.name, timestamp)
             if self._pause_requested:
