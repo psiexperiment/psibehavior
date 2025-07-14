@@ -258,13 +258,34 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             name = 'trial'
             label = 'Trial'
 
-            EnumParameter:
-                name = 'repeat_incorrect'
-                label = 'Repeat incorrect/invalid trials?'
-                compact_label = 'repeat_incorrect'
-                default = 'Yes'
-                choices = {'No': 0, 'Early only': 1, 'Yes': 2}
-                scope = 'arbitrary'
+            Conditional:
+                condition = manifest.N_response == 1
+                EnumParameter:
+                    # Special case to repeat for FA only trials in the go/nogo 
+                    name = 'repeat_incorrect'
+                    label = 'Repeat incorrect/invalid trials?'
+                    compact_label = 'repeat_incorrect'
+                    default = 'Yes'
+                    choices = {
+                        'No': 0,
+                        'Early withdraw only': 1,
+                        'False alarm (nogo) only': 3,
+                        'All': 2,
+                    }
+                    scope = 'arbitrary'
+            Conditional:
+                condition = manifest.N_response > 1
+                EnumParameter:
+                    name = 'repeat_incorrect'
+                    label = 'Repeat incorrect/invalid trials?'
+                    compact_label = 'repeat_incorrect'
+                    default = 'Yes'
+                    choices = {
+                        'No': 0,
+                        'Early withdraw only': 1,
+                        'All trials': 2,
+                    }
+                    scope = 'arbitrary'
             Parameter:
                 name = 'iti_duration'
                 label = 'Intertrial interval (s)'
