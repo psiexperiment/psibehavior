@@ -29,6 +29,16 @@ class BaseTrialManager:
         self.trial_number = 0
 
     def prepare_trial(self):
+        '''
+        Returns
+        -------
+        int : correct response port
+            If greater than 0, indicates response port that is rewarded
+            (response ports are numbered starting at 1). If 0, this indicates
+            this is a nogo trial (i.e., no reward). If -1, indicates any
+            response port recieves a reward. For go/nogo experiments, there is
+            only one response port which will be numbered 1.
+        '''
         raise NotImplementedError
 
     def start_trial(self, delay):
@@ -46,28 +56,6 @@ class ParamTrialManager(BaseTrialManager):
     Allows users to specify list of parameters to add to GUI without creating a
     custom manifest.
     '''
-
-
-#class RepeatTrialManager(BaseTrialManager):
-#
-#    def __init__(self, manager):
-#        super().__init__(controller)
-#        self.trial_type = None
-#        self.prior_response = None
-#        self.prior_score = None
-#
-#
-#class HyperacusisGoNogoManager(BaseTrialManager):
-#
-#    def __init__(self, manager):
-#        super().__init__(controller)
-#        self.output = self.controller.get_output('output_1')
-#        self.sync_trigger = self.controller.get_output('sync_trigger_out')
-#
-#        # Attributes that need to be configured by `prepare_trial`.
-#        self.trial_type = None
-#        self.prior_response = None
-#        self.prior_score = None
 
 
 TINNITUS_FREQUENCIES = octave_space(2, 32, 0.5) * 1e3
@@ -277,8 +265,6 @@ class Tinnitus2AFCManager(BaseTrialManager):
         self.trial_number += 1
 
 
-
-
 GONOGO_PARAMETERS = [
     {
         'name': 'go_probability',
@@ -311,7 +297,111 @@ GONOGO_PARAMETERS = [
 ]
 
 
-class HyperacusisGoNogoManager(BaseTrialManager):
+class GoNogoTrialManager(BaseTrialManager):
+
+    default_parameters = GONOGO_PARAMETERS
+
+    def __init__(self, controller):
+        super().__init__(controller)
+        # Attributes used to track state of trials
+        self.prior_info = None, None
+        self.trial_type = None
+        self.rng = np.random.default_rng()
+        self.consecutive_nogo = 0
+        self.current_stim = {}
+
+    def next_ttype(self):
+        '''
+        Determine next trial type.
+        '''
+        n_remind = self.context.get_value('remind_trials')
+        n_warmup = self.context.get_value('warmup_trials')
+        go_probability = self.context.get_value('go_probability')
+        repeat_mode = self.context.get_value('repeat_incorrect')
+        max_nogo = self.context.get_value('max_nogo')
+
+        if self.trial_number < n_remind:
+            return 'go_remind'
+
+        if self.controller._remind_requested:
+            return 'go_remind'
+            self.controller._remind_requested = False
+
+        if self.trial_number < (n_remind + n_warmup):
+            return 'go_remind' if self.rng.uniform() <= go_probability else 'nogo'
+
+        if self.consecutive_nogo >= max_nogo:
+            return 'go_forced'
+
+        if repeat_mode != 0:
+            ttype, resp, score = self.prior_info
+            if repeat_mode == 1 and resp == 'early_np':
+                # early withdraw only
+                return ttype.split('_', 1)[0] + '_repeat'
+            if repeat_mode == 2 and score != self.controller.scores.correct:
+                # all incorrect trials
+                return ttype.split('_', 1)[0] + '_repeat'
+            if repeat_mode == 3 and ttype.startswith('nogo') and \
+                    score != self.controller.scores.correct:
+                # Only FA trials
+                return ttype.split('_', 1)[0] + '_repeat'
+
+        return 'go' if self.rng.uniform() <= go_probability else 'nogo'
+
+    def prepare_trial(self):
+        self.trial_type = self.next_ttype()
+        self.current_stim = self.next_stim(self.trial_type)
+
+        # Update context with some information about trial and stim
+        self.context.set_value('trial_type', self.trial_type)
+        self.context.set_values(self.current_stim)
+
+        # Prepare a string representation for GUI
+        stim_info = self.stim_info(self.current_stim)
+        if '_' in self.trial_type:
+            a, b = self.trial_type.split('_')
+            ttype_info = f'Trial {self.trial_number + 1}: {a} ({b})'
+        else:
+            ttype_info = f'Trial {self.trial_number + 1}: {self.trial_type}'
+        self.controller.trial_state_str = f'{ttype_info}{stim_info}'
+
+        waveform = self.stim_waveform(self.current_stim)
+        with self.output.engine.lock:
+            self.output.set_waveform(waveform)
+
+        return 0 if self.trial_type.startswith('nogo') else 1
+
+    def start_trial(self, delay):
+        with self.output.engine.lock:
+            ts = self.controller.get_ts()
+            self.output.start_waveform(ts + delay)
+            self.sync_trigger.trigger(ts + delay, 0.1)
+        return ts
+
+    def end_trial(self, delay=0):
+        with self.output.engine.lock:
+            ts = self.controller.get_ts()
+            self.output.stop_waveform(ts + delay)
+
+    def trial_complete(self, response, score, info):
+        self.prior_info = self.trial_type, response, score
+        self.trial_number += 1
+        if self.trial_type.startswith('nogo'):
+            self.consecutive_nogo += 1
+        else:
+            self.consecutive_nogo = 0
+
+    def next_stim(self, trial_type):
+        raise NotImplementedError
+
+    def stim_info(self, stim):
+        raise NotImplementedError
+
+    def stim_waveform(self, stim):
+        raise NotImplementedError
+
+
+class HyperacusisGoNogoManager(GoNogoTrialManager):
 
     default_group_name = 'Hyperacusis'
 
@@ -345,61 +435,19 @@ class HyperacusisGoNogoManager(BaseTrialManager):
             'label': 'Level (dB SPL)',
             'type': 'Result',
         },
-    ] + GONOGO_PARAMETERS
-
+    ] + GoNogoTrialManager.default_parameters
 
     def __init__(self, controller):
         super().__init__(controller)
         self.output = self.controller.get_output('output_1')
         self.sync_trigger = self.controller.get_output('sync_trigger_out')
-
         # Attributes that need to be configured by `prepare_trial`.
-        self.prior_info = None, None
         self.frequencies = None
         self.levels = None
-        self.trial_type = None
-        self.rng = np.random.default_rng()
-        self.remind_requested = False
-        self.consecutive_nogo = 0
 
-    def next_ttype(self):
-        '''
-        Determine next trial type.
-        '''
-        n_remind = self.context.get_value('remind_trials')
-        n_warmup = self.context.get_value('warmup_trials')
-        go_probability = self.context.get_value('go_probability')
-        repeat_mode = self.context.get_value('repeat_incorrect')
-        max_nogo = self.context.get_value('max_nogo')
-
-        if self.trial_number < n_remind:
-            return 'go_remind'
-
-        if self.remind_requested:
-            return 'go_remind'
-            self.remind_requested = False
-
-        if self.trial_number < (n_remind + n_warmup):
-            return 'go_remind' if self.rng.uniform() <= go_probability else 'nogo'
-
-        if self.consecutive_nogo >= max_nogo:
-            return 'go_forced'
-
-        if repeat_mode != 0:
-            ttype, resp, score = self.prior_info
-            if repeat_mode == 1 and resp == 'early_np':
-                # early withdraw only
-                return ttype.split('_', 1)[0] + '_repeat'
-            if repeat_mode == 2 and score != self.controller.scores.correct:
-                # all incorrect trials
-                return ttype.split('_', 1)[0] + '_repeat'
-            if repeat_mode == 3 and ttype.startswith('nogo') and score != self.controller.scores.correct:
-                # Only FA trials
-                return ttype.split('_', 1)[0] + '_repeat'
-
-        return 'go' if self.rng.uniform() <= go_probability else 'nogo'
-
-    def advance_stim(self):
+    def next_stim(self, trial_type):
+        # First, check to see if any context values have changed and, if so,
+        # update the selector.
         frequencies = self.context.get_value('frequency_list')
         levels = self.context.get_value('level_list')
 
@@ -410,74 +458,44 @@ class HyperacusisGoNogoManager(BaseTrialManager):
             self.frequencies = frequencies
             self.levels = levels
 
-        self.trial_type = ttype = self.next_ttype()
-        if ttype == 'go_remind':
+        if trial_type == 'go_remind':
             # Should be an easy trial. Randomly pick from selected frequencies
             # and use max level configured.
-            self.current_freq = self.rng.choice(self.frequencies)
-            self.current_level = max(self.levels)
-        elif ttype == 'nogo':
-            self.current_freq = None
-            self.current_level = None
-        elif ttype in ('go', 'go_forced'):
-            self.current_freq, self.current_level = next(self.stim_selector)
-        elif ttype in ('nogo_repeat', 'go_repeat'):
+           return {
+               'frequency': self.rng.choice(self.frequencies),
+               'level': max(self.levels),
+           }
+
+        if trial_type == 'nogo':
+            return {
+                'frequency': None,
+                'level': None,
+            }
+
+        if trial_type in ('go', 'go_forced'):
+            freq, level = next(self.stim_selector)
+            return {
+                'frequency': freq,
+                'level': level,
+            }
+
+        if trial_type in ('nogo_repeat', 'go_repeat'):
             # Don't change current_freq or current_level since we are repeating.
-            pass
+            return self.current_stim
 
-    def prepare_trial(self):
-        self.advance_stim()
+    def stim_info(self, stim):
+        if stim['frequency'] is None:
+            return ''
+        return f' {stim["frequency"]*1e-3:.1f} Hz, {stim["level"]:.0f} dB SPL'
 
-        # Prepare a string representation for GUI
-        if self.current_freq is None:
-            stim_info = ''
-        else:
-            stim_info = f' {self.current_freq*1e-3:.1f} Hz, {self.current_level:.0f} dB SPL'
-        if '_' in self.trial_type:
-            a, b = self.trial_type.split('_')
-            ttype_info = f'Trial {self.trial_number + 1}: {a} ({b})'
-        else:
-            ttype_info = f'Trial {self.trial_number + 1}: {self.trial_type}'
-        self.controller.trial_state_str = f'{ttype_info}{stim_info}'
-        self.context.set_value('trial_type', self.trial_type)
-
-        if self.current_freq is None:
-            waveform = silence(fs=self.output.fs, duration=1)
-        else:
-            waveform = ramped_tone(
-                fs=self.output.fs,
-                frequency=self.current_freq,
-                level=self.current_level,
-                calibration=self.output.calibration,
-                duration=1,
-                window='cosine-squared',
-                rise_time=25e-3,
-            )
-
-        self.context.set_value('frequency', self.current_freq)
-        self.context.set_value('level', self.current_level)
-
-        with self.output.engine.lock:
-            self.output.set_waveform(waveform)
-
-        return 0
-
-    def start_trial(self, delay):
-        with self.output.engine.lock:
-            ts = self.controller.get_ts()
-            self.output.start_waveform(ts + delay)
-            self.sync_trigger.trigger(ts + delay, 0.1)
-        return ts
-
-    def end_trial(self, delay=0):
-        with self.output.engine.lock:
-            ts = self.controller.get_ts()
-            self.output.stop_waveform(ts + delay)
-
-    def trial_complete(self, response, score, info):
-        self.prior_info = self.trial_type, response, score
-        self.trial_number += 1
-        if self.trial_type.startswith('nogo'):
-            self.consecutive_nogo += 1
-        else:
-            self.consecutive_nogo = 0
+    def stim_waveform(self, stim):
+        if stim['frequency'] is None:
+            return silence(fs=self.output.fs, duration=1)
+        return ramped_tone(
+            **stim,
+            fs=self.output.fs,
+            calibration=self.output.calibration,
+            duration=1,
+            window='cosine-squared',
+            rise_time=25e-3,
+        )
