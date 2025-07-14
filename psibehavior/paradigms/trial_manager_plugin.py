@@ -18,6 +18,10 @@ class BaseTrialManager:
     #: the GUI.
     default_parameters = []
 
+    #: Default group name for each parameter in `default_parameters`. If None,
+    #: `group_name`, must be provided for each parameter.
+    default_group_name = None
+
     def __init__(self, controller):
         self.controller = controller
         self.context = controller.context

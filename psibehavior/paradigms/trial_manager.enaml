@@ -38,6 +38,7 @@ def generate_context_items(manifest, workbench):
 
     for entry in manager_class.default_parameters:
         entry = entry.copy()
+        entry.setdefault('group_name', manager_class.default_group_name)
         context_group_names.add(prefix + entry['group_name'])
         klass_name = entry.pop('type', 'Parameter')
         klass = getattr(context_api, klass_name)
