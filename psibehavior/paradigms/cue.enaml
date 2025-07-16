@@ -1,0 +1,33 @@
+from enaml.workbench.api import Extension
+
+from psi.context.api import BoolParameter
+from psi.controller.api import ExperimentAction, Toggle
+from psi.core.enaml.api import ExperimentManifest
+
+enamldef Light(ExperimentManifest): manifest:
+    '''
+    Requires an output named `cue_light`
+    '''
+    id = 'cue_light'
+
+    attr output_name = 'cue_light'
+
+    Extension:
+        id = manifest.id + '.actions'
+        point = 'psi.controller.actions'
+
+        ExperimentAction:
+            event = 'trial_start'
+            command = 'cue_light.on'
+
+        ExperimentAction:
+            event = 'trial_end'
+            command = 'cue_light.off'
+
+    Extension:
+        id = manifest.id + '.io'
+        point = 'psi.controller.io'
+
+        Toggle:
+            target_name = f'sw_do::{manifest.output_name}'
+            name = manifest.output_name

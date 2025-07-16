@@ -12,6 +12,38 @@ from psiaudio.stim import silence, ramped_tone
 from psiaudio.util import octave_band_freqs, octave_space
 
 
+class BaseContinuousStimManager:
+
+    #: List of parameters to add to GUI. Eliminates the need for a custom
+    #: `TrialManagerManifest` class if you only want to add new parameters to
+    #: the GUI.
+    default_parameters = []
+
+    #: Default group name for each parameter in `default_parameters`. If None,
+    #: `group_name`, must be provided for each parameter.
+    default_group_name = None
+
+    def __init__(self, controller):
+        self.controller = controller
+        self.context = controller.context
+
+    def initialize(self):
+        raise NotImplementedError
+
+    def next(self, samples, channel):
+        raise NotImplementedError
+
+
+class FIRBandlimitedNoise(BaseContinuousStimManager):
+
+    def __init__(self, controller):
+        super().__init__(controller)
+
+
+    def next(self, samples, channel):
+        return np.zeros(samples)
+
+
 class BaseTrialManager:
 
     #: List of parameters to add to GUI. Eliminates the need for a custom
@@ -49,13 +81,6 @@ class BaseTrialManager:
 
     def trial_complete(self, response, score, info):
         raise NotImplementedError
-
-
-class ParamTrialManager(BaseTrialManager):
-    '''
-    Allows users to specify list of parameters to add to GUI without creating a
-    custom manifest.
-    '''
 
 
 TINNITUS_FREQUENCIES = octave_space(2, 32, 0.5) * 1e3
@@ -120,11 +145,11 @@ class Tinnitus2AFCManager(BaseTrialManager):
 
         self.stim_config = {
             'NBN': {
-                'n': 4,
+                'n': 5,
                 'side': 1,
             },
             'SAM': {
-                'n': 4,
+                'n': 3,
                 'side': 2,
             },
             'silence': {
@@ -481,6 +506,64 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
 
         if trial_type in ('nogo_repeat', 'go_repeat'):
             # Don't change current_freq or current_level since we are repeating.
+            return self.current_stim
+
+    def stim_info(self, stim):
+        if stim['frequency'] is None:
+            return ''
+        return f' {stim["frequency"]*1e-3:.1f} Hz, {stim["level"]:.0f} dB SPL'
+
+    def stim_waveform(self, stim):
+        if stim['frequency'] is None:
+            return silence(fs=self.output.fs, duration=1)
+        return ramped_tone(
+            **stim,
+            fs=self.output.fs,
+            calibration=self.output.calibration,
+            duration=1,
+            window='cosine-squared',
+            rise_time=25e-3,
+        )
+
+
+class WavGoNogoManager(GoNogoTrialManager):
+
+    default_group_name = 'Stimuli'
+
+    default_parameters = [
+        {
+            'name': 'level',
+            'label': 'Level (dB SPL)',
+            'default': 80,
+        },
+    ] + GoNogoTrialManager.default_parameters
+
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.output = self.controller.get_output('output_1')
+        self.sync_trigger = self.controller.get_output('sync_trigger_out')
+
+    def next_stim(self, trial_type):
+        if (self.frequencies != frequencies) or (self.levels != levels):
+            # Regenerate stim sequence
+            sequence = list(itertools.product(frequencies, levels))
+            self.stim_selector = shuffled_set(sequence)
+            self.frequencies = frequencies
+            self.levels = levels
+
+        if trial_type == 'go_remind':
+            # Should be an easy trial. Randomly pick from selected frequencies
+            # and use max level configured.
+            return next(self.stim_selector)
+
+        if trial_type == 'nogo':
+            return {}
+
+        if trial_type in ('go', 'go_forced'):
+            return next(self.stim_selector)
+
+        if trial_type in ('nogo_repeat', 'go_repeat'):
+            # Repeat current stim.
             return self.current_stim
 
     def stim_info(self, stim):

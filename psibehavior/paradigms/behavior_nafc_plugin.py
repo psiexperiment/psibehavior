@@ -3,14 +3,15 @@ log = logging.getLogger(__name__)
 
 import enum
 
-from atom.api import Bool, Dict, Int, Str, Typed
+from atom.api import Bool, Dict, Int, List, Str, Typed
 from enaml.application import timed_call
 from enaml.core.api import d_
 import numpy as np
 
 #from psilbhb.stim.wav_set import WavSet
 from .base_behavior_plugin import (BaseBehaviorPlugin, TrialState)
-from .trial_manager_plugin import BaseTrialManager
+from .trial_manager_plugin import (BaseTrialManager, BaseContinuousStimManager)
+
 
 ################################################################################
 # Supporting
@@ -108,6 +109,9 @@ class BehaviorPlugin(BaseBehaviorPlugin):
 
     #: Trial object
     trial_manager = Typed(BaseTrialManager)
+
+    #: Stim managers
+    stim_managers = List(Typed(BaseContinuousStimManager))
 
     #: Enum indicating appropriate response. If -1, a response on any reward
     #: port is acceptable and should be rewarded. If 0, a response on any port

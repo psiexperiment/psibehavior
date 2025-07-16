@@ -32,6 +32,21 @@ COMMON_PLUGINS = [
         },
         'required': True,
     },
+    {
+        'manifest': 'psi.paradigms.core.signal_mixins.MultiSignalFFTViewManifest',
+        'attrs': {
+            'sources': {
+                'microphone_1': {'color': 'black', 'apply_calibration': True},
+            },
+            'fft_freq_lb': 1e3,
+        },
+        'required': True,
+    },
+    {
+        'manifest': PATH + 'timeout.Light',
+        'attrs': {},
+        'required': True
+    },
 ]
 
 
@@ -54,23 +69,10 @@ ParadigmDescription(
             'attrs': {'output_name': 'pellet_2', 'label': 'Pellet 2', 'event_name': 'deliver_reward_2'},
             'required': True
         },
-
-        # Timeout
         {
-            'manifest': PATH + 'timeout.Light',
+            'manifest': PATH + 'cue.Light',
             'attrs': {},
             'required': True
-        },
-
-        {
-            'manifest': 'psi.paradigms.core.signal_mixins.MultiSignalFFTViewManifest',
-            'attrs': {
-                'sources': {
-                    'microphone_1': {'color': 'black', 'apply_calibration': True},
-                },
-                'fft_freq_lb': 1e3,
-            },
-            'required': True,
         },
     ],
 )
@@ -83,30 +85,32 @@ ParadigmDescription(
         {'manifest': PATH + 'trial_manager.TrialManagerManifest',
          'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.HyperacusisGoNogoManager'},
         },
-
         # Reward dispenser
         {
             'manifest': PATH + 'reward.PelletDispenser',
             'attrs': {'output_name': 'pellet_1', 'label': 'Pellet 1', 'event_name': 'deliver_reward_1'},
             'required': True
         },
+    ],
+)
 
-        # Timeout
-        {
-            'manifest': PATH + 'timeout.Light',
-            'attrs': {},
-            'required': True
+
+ParadigmDescription(
+    'signal-in-noise', 'Signal in noise (go/nogo)', 'animal',
+    COMMON_PLUGINS + [
+        {'manifest': PATH + 'behavior_nafc.BehaviorManifest', 'attrs': {'N_response': 1, 'N_output': 1}},
+        {'manifest': PATH + 'trial_manager.TrialManagerManifest',
+         'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.WavGoNogoManager'},
+        },
+        {'manifest': PATH + 'trial_manager.ContinuousStimManagerManifest',
+         'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.Silence'},
         },
 
+        # Reward dispenser
         {
-            'manifest': 'psi.paradigms.core.signal_mixins.MultiSignalFFTViewManifest',
-            'attrs': {
-                'sources': {
-                    'microphone_1': {'color': 'black', 'apply_calibration': True},
-                },
-                'fft_freq_lb': 1e3,
-            },
-            'required': True,
+            'manifest': PATH + 'reward.PelletDispenser',
+            'attrs': {'output_name': 'pellet_1', 'label': 'Pellet 1', 'event_name': 'deliver_reward_1'},
+            'required': True
         },
     ],
 )

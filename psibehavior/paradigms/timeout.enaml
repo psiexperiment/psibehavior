@@ -1,12 +1,14 @@
 from enaml.workbench.api import Extension
 
 from psi.context.api import BoolParameter
-from psi.controller.api import ExperimentAction
+from psi.controller.api import ExperimentAction, Toggle
 from psi.core.enaml.api import ExperimentManifest
 
 enamldef Light(ExperimentManifest): manifest:
 
     id = 'timeout_light'
+
+    attr output_name = 'room_light'
 
     Extension:
         id = manifest.id + '.items'
@@ -35,3 +37,11 @@ enamldef Light(ExperimentManifest): manifest:
         ExperimentAction:
             event = 'to_end'
             command = 'room_light.on'
+
+    Extension:
+        id = manifest.id + '.io'
+        point = 'psi.controller.io'
+
+        Toggle:
+            target_name = f'sw_do::{manifest.output_name}'
+            name = manifest.output_name
