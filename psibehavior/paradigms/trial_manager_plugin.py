@@ -439,6 +439,8 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
             'type': 'MultiSelectParameter',
             'choices': TINNITUS_CHOICES,
             'quote_values': False,
+            'button_width': 40,
+            'n_cols': 4,
         },
         {
             'name': 'level_list',
@@ -448,6 +450,8 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
             'type': 'MultiSelectParameter',
             'choices': {str(l): l for l in np.arange(0, 81, 10).astype('i')},
             'quote_values': False,
+            'button_width': 40,
+            'n_cols': 4,
         },
 
         {
