@@ -34,14 +34,15 @@ class NAFCTrialState(TrialState):
     "waiting_for_to").
     '''
     waiting_for_resume = 'waiting for resume'
-    waiting_for_trial_start = 'waiting trial start'
-    waiting_for_np_start = 'waiting nose-poke start'
-    waiting_for_np_duration = 'waiting nose-poke duration'
+    waiting_for_trial_start = 'waiting for trial start'
+    waiting_for_np_start = 'waiting for nose-poke start'
+    waiting_for_np_duration = 'waiting for nose-poke duration'
     waiting_for_hold = 'waiting for hold'
     waiting_for_response = 'waiting for response'
     waiting_for_to = 'waiting for timeout'
-    waiting_for_iti = 'waiting intertrial interval'
-    waiting_for_reward_end = 'waiting break reward contact'
+    waiting_for_iti = 'waiting for intertrial interval'
+    waiting_for_np_end = 'waiting for nose-poke end'
+    waiting_for_reward_end = 'waiting for reward contact'
 
 
 class BaseNAFCEvent(enum.Enum):
@@ -280,23 +281,27 @@ class BehaviorPlugin(BaseBehaviorPlugin):
 
     def handle_waiting_for_hold(self, event, timestamp):
         if event.category == 'np' and event.phase == 'end':
+            # If animal withdraws during NP hold period, end trial.
             self.invoke_actions('response_end', timestamp)
             self.trial_info['response_ts'] = timestamp
             self.trial_info['response_side'] = np.nan
             self.end_trial('early_np', self.scores.invalid)
         elif event == self.events.hold_duration_elapsed:
             log.info('Hold duration over')
-            # If we are in training mode, deliver a reward preemptively
-            if self.context.get_value('training_mode') and (self.response_condition > 0):
-                self.invoke_actions(f'deliver_reward_{self.response_condition}', timestamp)
             self.advance_state('response', timestamp)
-            self.trial_info['response_start'] = timestamp
 
     def handle_waiting_for_response(self, event, timestamp):
         # Event is a tuple of 'response', 'start', side, True/False where False
         # indicates animal initiated event and True indicates human initiated
         # event via button. See the definbition of the NAFCEvent enum.
         log.info(f'Waiting for response. Received {event} at {timestamp}')
+
+        if event == self.events.response_start:
+            self.trial_info['response_start'] = timestamp
+            # If we are in training mode, deliver a reward preemptively
+            if self.context.get_value('training_mode') and (self.response_condition > 0):
+                self.invoke_actions(f'deliver_reward_{self.response_condition}', timestamp)
+            return
 
         if self.N_response == 1:
             # This is a special-case section for scoring go-nogo, which is
@@ -307,21 +312,30 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             if event.category == 'np' and event.phase == 'start':
                 self.trial_info['response_ts'] = timestamp
                 self.trial_info['response_side'] = 0
-                score = self.scores.correct if self.response_condition == 0 else self.scores.incorrect
-                response = event.category
-                self.end_trial(response, score)
+                response = 'np'
+                score = self.scores.correct if self.response_condition == 0 \
+                    else self.scores.incorrect
             elif event.category == 'response' and event.phase == 'elapsed':
                 self.trial_info['response_ts'] = np.nan
                 self.trial_info['response_side'] = np.nan
-                score = self.scores.correct if self.response_condition == 0 else self.scores.incorrect
                 response = 'no_response'
-                self.end_trial(response, score)
+                score = self.scores.correct if self.response_condition == 0 \
+                    else self.scores.incorrect
             elif event.category == 'response' and event.phase == 'start':
                 self.trial_info['response_ts'] = timestamp
                 self.trial_info['response_side'] = event.side
-                score = self.scores.correct if self.response_condition == 1 else self.scores.incorrect
-                response = f'{event.category}_{event.side}'
-                self.end_trial(response, score)
+                response = f'{self.response_name}_{event.side}'
+                score = self.scores.correct if self.response_condition == 1 \
+                    else self.scores.incorrect
+                if not self.context.get_value('training_mode'):
+                    self.invoke_actions(f'deliver_reward_{event.side}', timestamp)
+            else:
+                # This event does not need to be handled. Ignore and bypass any
+                # additional logic.
+                return
+            self.invoke_actions('response_end', timestamp)
+            self.end_trial(response, score)
+
         else:
             # This is the NAFC section of the scoring.
             if event.category == 'response' and event.phase == 'start':
@@ -344,7 +358,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
                     score = self.scores.incorrect
                 response = f'{self.response_name}_{event.side}'
                 self.end_trial(response, score)
-            elif event == self.events.response_duration_elapsed:
+            elif event.category == 'response' and event.phase == 'elapsed':
                 self.invoke_actions('response_end', timestamp)
                 self.trial_info['response_ts'] = np.nan
                 self.trial_info['response_side'] = np.nan
@@ -385,6 +399,9 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         if response.startswith(self.response_name):
             self.trial_state = NAFCTrialState.waiting_for_reward_end
             self.next_trial_state = next_state
+        elif not response.startswith('np') and self.np_active and not self.context.get_value('continuous_np'):
+            self.trial_state = NAFCTrialState.waiting_for_np_end
+            self.next_trial_state = next_state
         elif next_state == 'to':
             self.start_event_timer(f'to_duration', self.events.to_duration_elapsed)
             self.trial_state = NAFCTrialState.waiting_for_to
@@ -401,6 +418,16 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         self.trial_state = getattr(NAFCTrialState, f'waiting_for_{state}')
         elapsed_event = getattr(self.events, f'{state}_duration_elapsed')
         self.start_event_timer(f'{state}_duration', elapsed_event)
+        start_event = getattr(self.events, f'{state}_start')
+        self.handle_event(start_event, timestamp)
+
+    def handle_waiting_for_np_end(self, event, timestamp):
+        if event.category == 'np' and event.phase == 'end':
+            if self.next_trial_state == 'to':
+                self.start_event_timer(f'to_duration', self.events.to_duration_elapsed)
+                self.trial_state = NAFCTrialState.waiting_for_to
+            elif self.next_trial_state == 'iti':
+                self.advance_state('iti', timestamp)
 
     def handle_waiting_for_reward_end(self, event, timestamp):
         if event.category == 'response' and event.phase == 'end':

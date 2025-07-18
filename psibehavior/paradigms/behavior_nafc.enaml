@@ -258,6 +258,22 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             name = 'trial'
             label = 'Trial'
 
+            BoolParameter:
+                name = 'training_mode'
+                label = 'Training mode'
+                scope = 'arbitrary'
+                default = True
+            BoolParameter:
+                name = 'manual_control'
+                label = 'Manual control?'
+                scope = 'arbitrary'
+                default = False
+            BoolParameter:
+                name = 'continuous_np'
+                label = 'Allow continuous nose-poke?'
+                scope = 'arbitrary'
+                default = False
+
             Conditional:
                 condition = manifest.N_response == 1
                 EnumParameter:
@@ -286,6 +302,26 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                         'All trials': 2,
                     }
                     scope = 'arbitrary'
+
+            Parameter:
+                name = 'np_duration'
+                label = 'Nose-poke start duration (s)'
+                compact_label = 'NP'
+                default = 0.25
+            Parameter:
+                name = 'target_delay'
+                label = 'Target delay (s)'
+                default = 0.5
+            Parameter:
+                name = 'hold_duration'
+                label = 'Nose-poke hold duration (s)'
+                compact_label = 'Hold'
+                default = 0.0
+            Parameter:
+                name = 'response_duration'
+                label = 'Response duration (s)'
+                compact_label = 'Resp'
+                default = 3.0
             Parameter:
                 name = 'iti_duration'
                 label = 'Intertrial interval (s)'
@@ -296,35 +332,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 label = 'Timeout duration (s)'
                 compact_label = 'TO'
                 default = 1.0
-            Parameter:
-                name = 'response_duration'
-                label = 'Response duration (s)'
-                compact_label = 'Resp'
-                default = 3.0
-            Parameter:
-                name = 'target_delay'
-                label = 'Target delay (s)'
-                default = 0.5
-            Parameter:
-                name = 'np_duration'
-                label = 'Nose-poke start duration (s)'
-                compact_label = 'NP'
-                default = 0.25
-            Parameter:
-                name = 'hold_duration'
-                label = 'Nose-poke hold duration (s)'
-                compact_label = 'Hold'
-                default = 0.0
-            BoolParameter:
-                name = 'training_mode'
-                label = 'Training mode'
-                scope = 'arbitrary'
-                default = True
-            BoolParameter:
-                name = 'manual_control'
-                label = 'Manual control?'
-                scope = 'arbitrary'
-                default = False
 
         ContextGroup:
             name = 'results'
