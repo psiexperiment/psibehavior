@@ -1,0 +1,91 @@
+from functools import partial
+
+from enaml.widgets.api import Container, DockItem
+from enaml.workbench.api import Extension
+from enaml.workbench.core.api import Command
+
+from psi.context.api import OrderedContextMeta
+from psi.controller.api import ExperimentAction
+from psi.core.enaml.api import ExperimentManifest, ListDictTable
+from psi.data.sinks.api import TableStore
+from psi.experiment.api import ItemPreferences
+
+
+def update_trial_log(store, event):
+    store.process_table(event.parameters['result'])
+
+
+enamldef TrialLogManifest(ExperimentManifest): manifest:
+
+    id = 'trial_log'
+    attr label = 'Trial Log'
+    attr colors = {}
+
+    Extension:
+        id = manifest.id + '.sinks'
+        point = 'psi.data.sinks'
+
+        TableStore: store:
+            name = manifest.name
+
+    Extension:
+        id = manifest.id + '.behavior_commands'
+        point = 'enaml.workbench.core.commands'
+        Command:
+            id = manifest.id + '.update_trial_log'
+            handler = partial(update_trial_log, store)
+
+    Extension:
+        id = manifest.id + '.actions'
+        point = 'psi.controller.actions'
+
+        ExperimentAction:
+            event = 'trial_end'
+            command = manifest.id + '.update_trial_log'
+
+    Extension:
+        id = manifest.id + '.workspace'
+        point = 'psi.experiment.workspace'
+
+        DockItem:
+            closable = False
+            name << manifest.id
+            title << manifest.label
+
+            Container:
+                ListDictTable: table:
+                    data << store._data[:]
+                    get_cell_color => (row, column):
+                        tt = data[row].get('trial_type', None)
+                        return manifest.colors.get(tt, 'white')
+                    autoscroll = True
+                    columns_movable = False
+                    header_resize_mode = 'contents'
+                    stretch_last_section = False
+
+    Extension:
+        id = manifest.id + '.preferences'
+        point = 'psi.experiment.preferences'
+        ItemPreferences:
+            item << table
+            name << manifest.id
+            auto_save = ['column_widths']
+
+    Extension:
+        id = manifest.id + '.items'
+        point = 'psi.context.items'
+
+        OrderedContextMeta: meta:
+            editable = True
+            link_rove = False
+            name << manifest.id
+            label << '{} columns'.format(manifest.label)
+            values ::
+                table.columns = [v.name for v in values]
+                column_info = {}
+                for v in values:
+                    column_info[v.name] = {
+                        'label': v.compact_label,
+                        'to_string': '{:.2f}'.format if 'f' in v.dtype else str,
+                    }
+                table.column_info = column_info

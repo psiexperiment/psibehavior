@@ -5,7 +5,27 @@ PATH = 'psibehavior.paradigms.'
 CORE_PATH = 'psi.paradigms.core.'
 
 
+COLORS = {
+    # Used for TrialLog
+    'go': 'lightgreen',
+    'go_warmup': 'limegreen',
+    'go_forced': 'limegreen',
+    'go_remind': 'limegreen',
+    'go_manual': 'limegreen',
+
+    'nogo': 'lightpink',
+    'nogo_forced': 'pink',
+    'nogo_repeat': 'pink',
+    'nogo_warmup': 'pink',
+}
+
+
 COMMON_PLUGINS = [
+    {
+        'manifest': 'psibehavior.paradigms.trial_log.TrialLogManifest',
+        'required': True,
+        'attrs': {'colors': COLORS,},
+    },
     {
         'manifest': 'psibehavior.paradigms.video.PSIVideo',
         'attrs': {

@@ -14,7 +14,7 @@ from psi.controller.api import (
     ContinuousInput, ContinuousOutput, ControllerManifest, EpochOutput,
     ExperimentAction, ExperimentEvent, ExperimentState
 )
-from psi.data.sinks.api import EventLog, TrialLog
+from psi.data.sinks.api import EventLog
 from psi.experiment.api import StatusItem
 from psi.data.plots import (TimeContainer, TimepointPlot, ChannelPlot, ViewBox)
 from psi.data.sinks.api import BinaryStore
@@ -28,11 +28,6 @@ def process_et(event):
     events = event.parameters['data'].events
     for _, (edge, ts) in events[['event', 'ts']].iterrows():
         plugin.et_callback(name, edge, ts)
-
-
-def update_trial_log(event):
-    core = event.workbench.get_plugin('enaml.workbench.core')
-    core.invoke_command('trial_log.save', {'data': event.parameters['result']})
 
 
 def check_microphones(workbench, manifest):
@@ -116,9 +111,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             id = 'psi.controller.process_et'
             handler = process_et
         Command:
-            id = 'psi.controller.update_trial_log'
-            handler = update_trial_log
-        Command:
             id = 'psi.controller.prepare_trial'
             handler = lambda x: controller.prepare_trial()
         Command:
@@ -189,9 +181,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             event = 'experiment_initialize'
             command = 'psi.context.initialize'
             kwargs = {'selector': None}
-        ExperimentAction:
-            event = 'trial_end'
-            command = 'psi.controller.update_trial_log'
 
     Extension:
         id = manifest.id + '.data'
@@ -212,9 +201,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             # and messy.
             show_widget = True
             exclude = ['*contact*digital_acquired*', 'trial_ready']
-
-        TrialLog:
-            show_widget = True
 
     Extension:
         id = 'io'
