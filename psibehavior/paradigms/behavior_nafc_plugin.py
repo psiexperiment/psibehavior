@@ -339,7 +339,6 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         else:
             # This is the NAFC section of the scoring.
             if event.category == 'response' and event.phase == 'start':
-                self.invoke_actions('response_end', timestamp)
                 self.trial_info['response_ts'] = timestamp
                 self.trial_info['response_side'] = event.side
                 if self.response_condition == -1:
@@ -357,12 +356,18 @@ class BehaviorPlugin(BaseBehaviorPlugin):
                 else:
                     score = self.scores.incorrect
                 response = f'{self.response_name}_{event.side}'
-                self.end_trial(response, score)
             elif event.category == 'response' and event.phase == 'elapsed':
                 self.invoke_actions('response_end', timestamp)
                 self.trial_info['response_ts'] = np.nan
                 self.trial_info['response_side'] = np.nan
-                self.end_trial('no_response', self.scores.invalid)
+                response = 'no_response'
+                score = self.scores.invalid
+            else:
+                # This event does not need to be handled. Ignore and bypass any
+                # additional logic.
+                return
+            self.invoke_actions('response_end', timestamp)
+            self.end_trial(response, score)
 
     def end_trial(self, response, score):
         self.stop_event_timer()
