@@ -4,6 +4,7 @@ from psi.context.api import BoolParameter
 from psi.controller.api import ExperimentAction, Toggle
 from psi.core.enaml.api import ExperimentManifest
 
+
 enamldef Light(ExperimentManifest): manifest:
     '''
     Requires an output named `cue_light`
