@@ -1,0 +1,314 @@
+import logging
+log = logging.getLogger(__name__)
+
+import pandas as pd
+from scipy.stats import norm
+
+from atom.api import Bool, ContainerList, Float, Int, Value
+
+from enaml.core.api import d_
+from enaml.layout.api import hbox, vbox, spacer
+from enaml.qt.QtWidgets import QApplication
+from enaml.stdlib.fields import IntField
+from enaml.widgets.api import (CheckBox, Container, DockItem, Form, HGroup,
+                               Label, PushButton)
+from enaml.workbench.api import Extension, Plugin
+from enaml.workbench.core.api import Command
+
+from psi.controller.api import ExperimentAction
+from psi.context.api import OrderedContextMeta
+from psi.core.enaml.api import DataFrameTable, ExperimentManifest
+from psi.data.api import DataFramePlot, PlotContainer, ViewBox
+from psi.experiment.api import ItemPreferences
+
+
+class SDTAnalysisPlugin(Plugin):
+
+    grouping = d_(ContainerList())
+
+    limit = Int()
+    include_repeat_nogo = Bool(True)
+    include_go_remind = Bool(True)
+
+    data = ContainerList()
+    results = Value()
+    fa = Float()
+    fa_repeat = Float()
+
+    def append_data(self, event):
+        self.data.append(event.parameters['result'])
+        self.update_results()
+
+    def _observe_grouping(self, event):
+        self.update_results()
+
+    def _observe_limit(self, event):
+        self.update_results()
+
+    def _observe_include_repeat_nogo(self, event):
+        self.update_results()
+
+    def _observe_include_go_remind(self, event):
+        self.update_results()
+
+    def update_results(self):
+        # Exit if there's nothing to be done
+        if not self.data:
+            return
+        if not self.grouping:
+            return
+
+        # Pull out trials for analysis
+        data = self.data[-self.limit:]
+        valid_types = ['nogo', 'go']
+        if self.include_repeat_nogo:
+            valid_types.append('nogo_repeat')
+        if self.include_go_remind:
+            valid_types.append('go_remind')
+        data = [d for d in data if d['trial_type'] in valid_types]
+
+        # Add data to track FA rate
+        fa_data = [d for d in data if d['trial_type'] in ['nogo']]
+        fa_repeat_data = [d for d in data if d['trial_type'] in ['nogo', 'nogo_repeat']]
+
+        if fa_data:
+            self.fa = 1-pd.DataFrame(fa_data)['correct'].mean()
+            self.fa_repeat = 1-pd.DataFrame(fa_repeat_data)['correct'].mean()
+        else:
+            self.fa = 0
+            self.fa_repeat = 0
+
+        # Exit if no data left
+        if not data:
+            return
+
+        agg = ['sum', 'size', 'mean']
+        rename = {'sum': 'n_correct',
+                  'size': 'n_trials',
+                  'mean': 'fraction_correct'}
+        ttype_map = {'go': 'go', 'go_remind': 'go', 'nogo': 'nogo',
+                     'nogo_repeat': 'nogo'}
+        score_map = {'MISS': 0, 'CR': 0, 'FA': 1, 'HIT': 1}
+
+        grouping = ['trial_type'] + self.grouping
+        data = pd.DataFrame(data)
+        data['trial_type'] = data['trial_type'].map(ttype_map)
+        data['yes'] = False
+
+        go_mask = data['trial_type'].str.startswith('go')
+        data.loc[go_mask & data['correct'], 'yes'] = True
+        data.loc[~go_mask & ~data['correct'], 'yes'] = True
+
+        agg = ['sum', 'size', 'mean']
+        rename = {'sum': 'n_correct',
+                  'size': 'n_trials',
+                  'mean': 'fraction_correct'}
+        r = data.groupby(grouping)['correct'].agg(agg).rename(columns=rename)
+        r['z_score'] = data.groupby(grouping)['yes'].mean() \
+            .clip(lower=0.05, upper=0.95) \
+            .apply(norm.ppf)
+
+        # Attempt to correct for the FA rate. If there is no NOGO, then assume
+        # the FA rate is 0.05 (which corresponds to a "correct" rate of 0.95.
+        try:
+            reference = r.loc['nogo', 'z_score'].rename('reference_z_score')
+            reference = reference.reset_index(self.grouping[-1], drop=True)
+            if len(self.grouping) == 1:
+                if len(reference) != 1:
+                    raise ValueError('Cannot process reference')
+                r = r.reset_index()
+                r['reference_z_score'] = reference.iat[0]
+            else:
+                r = r.reset_index().join(reference, on=reference.index.names)
+        except KeyError as e:
+            log.debug('Handling exception by assuming FA rate is 5%')
+            r['reference_z_score'] = norm.ppf(0.05)
+        except Exception as e:
+            log.debug('Handling exception by assuming FA rate is 5%')
+            r['reference_z_score'] = norm.ppf(0.05)
+        finally:
+            log.error(r)
+            r['z_score'] = r['z_score'] - r['reference_z_score']
+            if r.index.nlevels != 1:
+                r = r.reset_index()
+
+        # The reset_index here renumbers the index from 0 ... n_rows
+        self.results = r.sort_values(self.grouping).reset_index(drop=True)
+
+
+EXTRA_COLUMNS = ['n_trials', 'n_correct', 'fraction_correct', 'z_score']
+
+EXTRA_COLUMN_INFO = {
+    'n_trials': {'label': '# trials', 'to_string': lambda x: str(int(x))},
+    'n_correct': {'label': '# correct', 'to_string': lambda x: str(int(x))},
+    'fraction_correct': {'label': 'Frac.', 'to_string': '{:.2f}'.format},
+    'z_score': {'label': 'd\'', 'to_string': '{:.2f}'.format},
+}
+
+
+enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
+
+    id = 'sdt_analysis'
+    title = 'SDT Analysis'
+    attr colors = {}
+
+    factory = SDTAnalysisPlugin
+
+    Extension:
+        id = manifest.id + '.items'
+        point = 'psi.context.items'
+
+        OrderedContextMeta: meta:
+            attr plugin = workbench.get_plugin(manifest.id)
+
+            editable = True
+            name << manifest.id
+            label << '{} grouping'.format(manifest.title)
+            values::
+                # Update SDT table
+                meta_columns = [v.name for v in meta.values]
+                if not meta_columns:
+                    sdt_table.columns = []
+                    sdt_table.column_info = {}
+                    sdt_plot.grouping = []
+                    sdt_plot.x_column = ''
+                    plugin.grouping = []
+                else:
+                    columns = meta_columns + EXTRA_COLUMNS
+                    column_info = {}
+                    for v in values:
+                        column_info[v.name] = {
+                            'label': v.compact_label,
+                            'to_string': '{:.2f}'.format if 'f' in v.dtype else str,
+                        }
+                    column_info.update(EXTRA_COLUMN_INFO)
+
+                    # Order is important here to prevent triggering updates of
+                    # table before table has been notified that columns were
+                    # dropped/added.
+                    sdt_table.columns = columns
+                    sdt_table.column_info = column_info
+                    sdt_plot.grouping = meta_columns[:-1]
+                    sdt_plot.x_column = meta_columns[-1]
+                    plugin.grouping = [v.name for v in values]
+
+    Extension:
+        id = manifest.id + 'commands'
+        point = 'enaml.workbench.core.commands'
+        Command:
+            id = manifest.id + '.update_analysis'
+            handler = workbench.get_plugin(manifest.id).append_data
+
+    Extension:
+        id = manifest.id + '.actions'
+        point = 'psi.controller.actions'
+        ExperimentAction:
+            event = 'trial_end'
+            command = manifest.id + '.update_analysis'
+
+    Extension:
+        id = manifest.id + '.plots'
+        point = 'psi.data.plots'
+
+        PlotContainer:
+            label = manifest.title + ' plot'
+            name = manifest.id + '.sdt_plot'
+
+            ViewBox:
+                DataFramePlot: sdt_plot:
+                    initialized ::
+                        print(self.pen_color_cycle)
+                        print(self.data)
+                        # There seems to be an initialization issue. Items are
+                        # not getting bound properly. Probably need to set up a
+                        # plots manifest thing.
+
+                    pen_color_cycle = 'palettable.cartocolors.qualitative.Safe_10'
+                    y_column = 'z_score'
+                    # TODO: Why is this not binding? I have to manually update
+                    # in the sdt_table below.
+                    data << workbench.get_plugin(manifest.id).results
+
+    Extension:
+        id = manifest.id + '.workspace'
+        point = 'psi.experiment.workspace'
+
+        DockItem:
+            closable = False
+            name = manifest.id
+            title = manifest.title
+            attr plugin = workbench.get_plugin(manifest.id)
+
+            Container: sdt_container:
+                constraints = [
+                    vbox(
+                        hbox(
+                            settings_form,
+                            vbox(copy_button, spacer),
+                        ),
+                        sdt_table,
+                        fa_form,
+                    ),
+                    copy_button.width == 20,
+                ]
+
+                Form: settings_form:
+                    padding = 0
+                    Label: limit_label:
+                        text = 'Trial limit'
+                        hug_width = 'strong'
+                    IntField: limit_field:
+                        text << str(plugin.limit)
+                        text ::
+                            plugin.limit = int(text)
+                    Label:
+                        text = 'Include'
+                    HGroup:
+                        padding = 0
+                        spacing = 5
+                        CheckBox: repeat_nogo_field:
+                            checked := plugin.include_repeat_nogo
+                            text = 'repeat NOGO'
+                        CheckBox: go_remind_field:
+                            checked := plugin.include_go_remind
+                            text = 'reminders'
+
+                PushButton: copy_button:
+                    text = '📋'
+                    clicked ::
+                        text = sdt_table.as_string()
+                        cb = QApplication.clipboard()
+                        cb.setText(text)
+
+                Form: fa_form:
+                    padding = 0
+                    Label: fa_label:
+                        text = 'FA rate'
+                    Label: fa_value:
+                        text << '{:.2f}'.format(plugin.fa)
+                    Label: fa_repeat_label:
+                        text = 'FA rate (incl. repeat)'
+                    Label: fa_repeat_value:
+                        text << '{:.2f}'.format(plugin.fa_repeat)
+
+                DataFrameTable: sdt_table:
+                    name = 'sdt_table'
+                    header_resize_mode = 'contents'
+                    stretch_last_section = False
+                    columns_movable = False
+                    data << plugin.results
+                    data ::
+                        # TODO: Why???
+                        sdt_plot.data = plugin.results
+                    get_cell_color => (row, column):
+                        tt = data.at[row, 'trial_type']
+                        return manifest.colors[tt]
+
+    Extension:
+        id = manifest.id + '.preferences'
+        point = 'psi.experiment.preferences'
+        rank = 200
+        ItemPreferences:
+            item << sdt_table
+            name << manifest.id
+            auto_save = ['column_config']

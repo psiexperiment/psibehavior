@@ -1,0 +1,211 @@
+import logging
+log = logging.getLogger(__name__)
+
+import pandas as pd
+from scipy.stats import norm
+
+from atom.api import observe, Bool, ContainerList, Float, Int, Value
+
+from enaml.core.api import d_
+from enaml.layout.api import hbox, vbox, spacer
+from enaml.qt.QtWidgets import QApplication
+from enaml.stdlib.fields import IntField
+from enaml.widgets.api import (CheckBox, Container, DockItem, Form, HGroup,
+                               Label, PushButton)
+from enaml.workbench.api import Extension, Plugin
+from enaml.workbench.core.api import Command
+
+from psi.controller.api import ExperimentAction
+from psi.context.api import OrderedContextMeta
+from psi.core.enaml.api import DataFrameTable, ExperimentManifest
+from psi.data.api import DataFramePlot, PlotContainer, ViewBox
+from psi.experiment.api import ItemPreferences
+
+
+class NAFCAnalysisPlugin(Plugin):
+
+    #: Columns to group analysis by
+    grouping = ContainerList()
+
+    #: Limit analysis to last N trials
+    limit = Int()
+
+    #: Include repeated trials in analysis?
+    include_repeats = Bool(True)
+
+    data = ContainerList()
+    results = Value()
+
+    def append_data(self, event):
+        self.data.append(event.parameters['result'])
+        self.update_results()
+
+    @observe('grouping', 'limit', 'include_repeats')
+    def update_results(self, event=None):
+        # Exit if there's nothing to be done
+        if not self.data:
+            return
+        if not self.grouping:
+            return
+
+        rename = {
+            'sum': 'n_correct',
+            'size': 'n_trials',
+            'mean': 'fraction_correct'
+        }
+        agg = list(rename)
+
+        # Pull out trials for analysis
+        data = pd.DataFrame(self.data[-self.limit:])
+
+        if not self.include_repeats:
+            data = data.query('trial_subtype != "repeat"')
+
+        self.results = \
+            data.groupby(self.grouping)['correct'].agg(agg) \
+                .rename(columns=rename) \
+                .sort_index() \
+                .reset_index()
+
+
+EXTRA_COLUMNS = {
+    'n_trials': {'label': '# trials', 'to_string': lambda x: str(int(x))},
+    'n_correct': {'label': '# correct', 'to_string': lambda x: str(int(x))},
+    'fraction_correct': {'label': 'Frac.', 'to_string': '{:.2f}'.format},
+}
+
+
+enamldef NAFCAnalysisManifest(ExperimentManifest): manifest:
+
+    id = 'nafc_anlaysis'
+    title = 'NAFC Analysis'
+    attr colors = {}
+
+    factory = NAFCAnalysisPlugin
+
+    Extension:
+        id = manifest.id + '.items'
+        point = 'psi.context.items'
+
+        OrderedContextMeta: meta:
+            # Adds a contribution that allows the user to specify what context
+            # items are used in grouping the the trials for analysis.
+            attr plugin = workbench.get_plugin(manifest.id)
+
+            mandatory_items = [
+                # This requires the actual context item, not the name of the
+                # context item. Right now the ContextMeta objects do not have a
+                # way to obtain the context plugin to track down items by name.
+                workbench.get_plugin('psi.context').get_item('trial_type')
+            ]
+
+            forbidden_items = [
+                # These items are used in the computations by NAFC and it does
+                # not make sense to include them in the grouping.
+                workbench.get_plugin('psi.context').get_item('trial_subtype'),
+                workbench.get_plugin('psi.context').get_item('score'),
+                workbench.get_plugin('psi.context').get_item('response'),
+            ]
+
+            editable = True
+            name << manifest.id
+            label << '{} grouping'.format(manifest.title)
+            values::
+                meta_columns = [v.name for v in meta.values]
+                if not meta_columns:
+                    nafc_table.columns = []
+                    nafc_table.column_info = {}
+                    plugin.grouping = []
+                else:
+                    columns = meta_columns + list(EXTRA_COLUMNS)
+                    column_info = {}
+                    for v in values:
+                        column_info[v.name] = {
+                            'label': v.compact_label,
+                            'to_string': '{:.2f}'.format if 'f' in v.dtype else str,
+                        }
+                    column_info.update(EXTRA_COLUMNS)
+
+                    # Order is important here to prevent triggering updates of
+                    # table before table has been notified that columns were
+                    # dropped/added.
+                    nafc_table.columns = columns
+                    nafc_table.column_info = column_info
+                    plugin.grouping = [v.name for v in values]
+
+    Extension:
+        id = manifest.id + 'commands'
+        point = 'enaml.workbench.core.commands'
+        Command:
+            id = manifest.id + '.update_analysis'
+            handler = workbench.get_plugin(manifest.id).append_data
+
+    Extension:
+        id = manifest.id + '.actions'
+        point = 'psi.controller.actions'
+        ExperimentAction:
+            event = 'trial_end'
+            command = manifest.id + '.update_analysis'
+
+    Extension:
+        id = manifest.id + '.workspace'
+        point = 'psi.experiment.workspace'
+
+        DockItem:
+            closable = False
+            name = manifest.id
+            title = manifest.title
+            attr plugin = workbench.get_plugin(manifest.id)
+
+            Container: nafc_container:
+                constraints = [
+                    vbox(
+                        hbox(
+                            settings_form,
+                            vbox(copy_button, spacer),
+                        ),
+                        nafc_table,
+                    ),
+                    copy_button.width == 20,
+                ]
+
+                Form: settings_form:
+                    padding = 0
+                    Label: limit_label:
+                        text = 'Trial limit'
+                        hug_width = 'strong'
+                    IntField: limit_field:
+                        text << str(plugin.limit)
+                        text ::
+                            plugin.limit = int(text)
+                    Label:
+                        text = 'Include repeats?'
+                    CheckBox:
+                        checked := plugin.include_repeats
+
+                PushButton: copy_button:
+                    text = '📋'
+                    clicked ::
+                        text = nafc_table.as_string()
+                        cb = QApplication.clipboard()
+                        cb.setText(text)
+
+                DataFrameTable: nafc_table:
+                    name = 'nafc_table'
+                    header_resize_mode = 'contents'
+                    stretch_last_section = False
+                    columns_movable = False
+                    data << plugin.results
+                    get_cell_color => (row, column):
+                        tt = data.at[row, 'trial_type']
+                        return manifest.colors.get(tt, 'white')
+
+    Extension:
+        id = manifest.id + '.preferences'
+        point = 'psi.experiment.preferences'
+        rank = 200
+        ItemPreferences:
+            # This saves the layout of the table (e.g., the column widths).
+            item << nafc_table
+            name << manifest.id
+            auto_save = ['column_config']

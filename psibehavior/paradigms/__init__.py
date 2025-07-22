@@ -94,6 +94,11 @@ ParadigmDescription(
             'attrs': {},
             'required': True
         },
+        {
+            'manifest': 'psibehavior.paradigms.nafc_analysis.NAFCAnalysisManifest',
+            'required': True,
+            'attrs': {'colors': COLORS,},
+        },
     ],
 )
 
@@ -110,6 +115,11 @@ ParadigmDescription(
             'manifest': PATH + 'reward.PelletDispenser',
             'attrs': {'output_name': 'pellet_1', 'label': 'Pellet 1', 'event_name': 'deliver_reward_1'},
             'required': True
+        },
+        {
+            'manifest': 'psibehavior.paradigms.sdt_analysis.SDTAnalysisManifest',
+            'required': True,
+            'attrs': {'colors': COLORS,},
         },
     ],
 )
