@@ -332,6 +332,10 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 compact_label = 'Type'
                 dtype = 'S32'
             Result:
+                name = 'trial_subtype'
+                compact_label = 'Trial subtype'
+                dtype = 'S32'
+            Result:
                 name = 'score'
                 dtype = 'S32'
             Result:
