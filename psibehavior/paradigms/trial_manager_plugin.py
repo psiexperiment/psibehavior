@@ -485,7 +485,8 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
         },
         {
             'name': 'frequency',
-            'label': 'Frequency (kHz)',
+            'label': 'Frequency (Hz)',
+            'compact_label': 'Freq (Hz)',
             'type': 'Result',
         },
         {
