@@ -27,8 +27,8 @@ class SDTAnalysisPlugin(Plugin):
     grouping = d_(ContainerList())
 
     limit = Int()
-    include_repeat_nogo = Bool(True)
-    include_go_remind = Bool(True)
+    include_repeats = Bool(True)
+    include_remind = Bool(True)
 
     data = ContainerList()
     results = Value()
@@ -45,10 +45,10 @@ class SDTAnalysisPlugin(Plugin):
     def _observe_limit(self, event):
         self.update_results()
 
-    def _observe_include_repeat_nogo(self, event):
+    def _observe_include_repeats(self, event):
         self.update_results()
 
-    def _observe_include_go_remind(self, event):
+    def _observe_include_remind(self, event):
         self.update_results()
 
     def update_results(self):
@@ -60,56 +60,40 @@ class SDTAnalysisPlugin(Plugin):
 
         # Pull out trials for analysis
         data = self.data[-self.limit:]
-        valid_types = ['nogo', 'go']
-        if self.include_repeat_nogo:
-            valid_types.append('nogo_repeat')
-        if self.include_go_remind:
-            valid_types.append('go_remind')
-        data = [d for d in data if d['trial_type'] in valid_types]
-
-        # Add data to track FA rate
-        fa_data = [d for d in data if d['trial_type'] in ['nogo']]
-        fa_repeat_data = [d for d in data if d['trial_type'] in ['nogo', 'nogo_repeat']]
-
-        if fa_data:
-            self.fa = 1-pd.DataFrame(fa_data)['correct'].mean()
-            self.fa_repeat = 1-pd.DataFrame(fa_repeat_data)['correct'].mean()
-        else:
-            self.fa = 0
-            self.fa_repeat = 0
-
-        # Exit if no data left
-        if not data:
-            return
-
-        agg = ['sum', 'size', 'mean']
-        rename = {'sum': 'n_correct',
-                  'size': 'n_trials',
-                  'mean': 'fraction_correct'}
-        ttype_map = {'go': 'go', 'go_remind': 'go', 'nogo': 'nogo',
-                     'nogo_repeat': 'nogo'}
-        score_map = {'MISS': 0, 'CR': 0, 'FA': 1, 'HIT': 1}
-
-        grouping = ['trial_type'] + self.grouping
         data = pd.DataFrame(data)
-        data['trial_type'] = data['trial_type'].map(ttype_map)
-        data['yes'] = False
 
-        go_mask = data['trial_type'].str.startswith('go')
+        all_nogo_data = data.query('trial_type == "nogo"')
+        nogo_data = all_nogo_data.query('trial_subtype != "repeat"')
+        self.fa_repeat = 1 - all_nogo_data['correct'].mean()
+        self.fa = 1 - nogo_data['correct'].mean()
+
+        if not self.include_repeats:
+            data = data.query('trial_subtype != "repeat"')
+        if not self.include_remind:
+            data = data.query('trial_subtype != "remind"')
+
+        data['yes'] = False
+        go_mask = data['trial_type'] == 'go'
         data.loc[go_mask & data['correct'], 'yes'] = True
         data.loc[~go_mask & ~data['correct'], 'yes'] = True
 
-        agg = ['sum', 'size', 'mean']
-        rename = {'sum': 'n_correct',
-                  'size': 'n_trials',
-                  'mean': 'fraction_correct'}
-        r = data.groupby(grouping)['correct'].agg(agg).rename(columns=rename)
-        r['z_score'] = data.groupby(grouping)['yes'].mean() \
+        rename = {
+            'sum': 'n_correct',
+            'size': 'n_trials',
+            'mean': 'fraction_correct'
+        }
+        agg = list(rename)
+        r = data \
+            .groupby(self.grouping)['correct'] \
+            .agg(agg) \
+            .rename(columns=rename)
+        r['z_score'] = data.groupby(self.grouping)['yes'].mean() \
             .clip(lower=0.05, upper=0.95) \
             .apply(norm.ppf)
 
         # Attempt to correct for the FA rate. If there is no NOGO, then assume
         # the FA rate is 0.05 (which corresponds to a "correct" rate of 0.95.
+        print(r)
         try:
             reference = r.loc['nogo', 'z_score'].rename('reference_z_score')
             reference = reference.reset_index(self.grouping[-1], drop=True)
@@ -136,9 +120,7 @@ class SDTAnalysisPlugin(Plugin):
         self.results = r.sort_values(self.grouping).reset_index(drop=True)
 
 
-EXTRA_COLUMNS = ['n_trials', 'n_correct', 'fraction_correct', 'z_score']
-
-EXTRA_COLUMN_INFO = {
+EXTRA_COLUMNS = {
     'n_trials': {'label': '# trials', 'to_string': lambda x: str(int(x))},
     'n_correct': {'label': '# correct', 'to_string': lambda x: str(int(x))},
     'fraction_correct': {'label': 'Frac.', 'to_string': '{:.2f}'.format},
@@ -161,36 +143,44 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
         OrderedContextMeta: meta:
             attr plugin = workbench.get_plugin(manifest.id)
 
+            mandatory_items = [
+                # This requires the actual context item, not the name of the
+                # context item. Right now the ContextMeta objects do not have a
+                # way to obtain the context plugin to track down items by name.
+                workbench.get_plugin('psi.context').get_item('trial_type')
+            ]
+
+            forbidden_items = [
+                # These items are used in the computations by NAFC and it does
+                # not make sense to include them in the grouping.
+                workbench.get_plugin('psi.context').get_item('trial_subtype'),
+                workbench.get_plugin('psi.context').get_item('score'),
+                workbench.get_plugin('psi.context').get_item('response'),
+            ]
+
             editable = True
-            name << manifest.id
-            label << '{} grouping'.format(manifest.title)
+            name = manifest.id
+            label = manifest.title + ' grouping'
             values::
                 # Update SDT table
-                meta_columns = [v.name for v in meta.values]
-                if not meta_columns:
-                    sdt_table.columns = []
-                    sdt_table.column_info = {}
-                    sdt_plot.grouping = []
-                    sdt_plot.x_column = ''
-                    plugin.grouping = []
-                else:
-                    columns = meta_columns + EXTRA_COLUMNS
-                    column_info = {}
-                    for v in values:
-                        column_info[v.name] = {
-                            'label': v.compact_label,
-                            'to_string': '{:.2f}'.format if 'f' in v.dtype else str,
-                        }
-                    column_info.update(EXTRA_COLUMN_INFO)
+                column_info = {}
+                for v in meta.values:
+                    column_info[v.name] = {
+                        'label': v.compact_label,
+                        'to_string': '{:.2f}'.format if 'f' in v.dtype else str,
+                    }
 
-                    # Order is important here to prevent triggering updates of
-                    # table before table has been notified that columns were
-                    # dropped/added.
-                    sdt_table.columns = columns
-                    sdt_table.column_info = column_info
-                    sdt_plot.grouping = meta_columns[:-1]
-                    sdt_plot.x_column = meta_columns[-1]
-                    plugin.grouping = [v.name for v in values]
+                meta_columns = list(column_info)
+                column_info.update(EXTRA_COLUMNS)
+
+                # Order is important here to prevent triggering updates of
+                # table before table has been notified that columns were
+                # dropped/added.
+                sdt_table.columns = list(column_info)
+                sdt_table.column_info = column_info
+                plugin.grouping = meta_columns
+                #sdt_plot.grouping = meta_columns[:-1]
+                #sdt_plot.x_column = meta_columns[-1]
 
     Extension:
         id = manifest.id + 'commands'
@@ -206,28 +196,28 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
             event = 'trial_end'
             command = manifest.id + '.update_analysis'
 
-    Extension:
-        id = manifest.id + '.plots'
-        point = 'psi.data.plots'
+    #Extension:
+    #    id = manifest.id + '.plots'
+    #    point = 'psi.data.plots'
 
-        PlotContainer:
-            label = manifest.title + ' plot'
-            name = manifest.id + '.sdt_plot'
+    #    PlotContainer:
+    #        label = manifest.title + ' plot'
+    #        name = manifest.id + '.sdt_plot'
 
-            ViewBox:
-                DataFramePlot: sdt_plot:
-                    initialized ::
-                        print(self.pen_color_cycle)
-                        print(self.data)
-                        # There seems to be an initialization issue. Items are
-                        # not getting bound properly. Probably need to set up a
-                        # plots manifest thing.
+    #        ViewBox:
+    #            DataFramePlot: sdt_plot:
+    #                initialized ::
+    #                    print(self.pen_color_cycle)
+    #                    print(self.data)
+    #                    # There seems to be an initialization issue. Items are
+    #                    # not getting bound properly. Probably need to set up a
+    #                    # plots manifest thing.
 
-                    pen_color_cycle = 'palettable.cartocolors.qualitative.Safe_10'
-                    y_column = 'z_score'
-                    # TODO: Why is this not binding? I have to manually update
-                    # in the sdt_table below.
-                    data << workbench.get_plugin(manifest.id).results
+    #                pen_color_cycle = 'palettable.cartocolors.qualitative.Safe_10'
+    #                y_column = 'z_score'
+    #                # TODO: Why is this not binding? I have to manually update
+    #                # in the sdt_table below.
+    #                data << workbench.get_plugin(manifest.id).results
 
     Extension:
         id = manifest.id + '.workspace'
@@ -267,10 +257,10 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                         padding = 0
                         spacing = 5
                         CheckBox: repeat_nogo_field:
-                            checked := plugin.include_repeat_nogo
+                            checked := plugin.include_repeats
                             text = 'repeat NOGO'
                         CheckBox: go_remind_field:
-                            checked := plugin.include_go_remind
+                            checked := plugin.include_remind
                             text = 'reminders'
 
                 PushButton: copy_button:
@@ -297,9 +287,9 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                     stretch_last_section = False
                     columns_movable = False
                     data << plugin.results
-                    data ::
-                        # TODO: Why???
-                        sdt_plot.data = plugin.results
+                    #data ::
+                    #    # TODO: Why???
+                    #    sdt_plot.data = plugin.results
                     get_cell_color => (row, column):
                         tt = data.at[row, 'trial_type']
                         return manifest.colors[tt]

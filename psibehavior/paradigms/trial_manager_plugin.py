@@ -62,6 +62,17 @@ class BaseTrialManager:
 
     def prepare_trial(self):
         '''
+        Subclasses are responsible for setting 'trial_type' and 'trial_subtype'
+        in the context, e.g.:
+
+            self.context.set_value('trial_type', 'nogo')
+            self.context.set_value('trial_subtype', 'repeat')
+
+        Trial type will be specific to the paradigm and should be coded
+        appropriately. Trial subtype indicates if it is a special class (e.g.,
+        'repeat', 'forced', 'remind', 'warmup') that may need to be excluded
+        from analysis.
+
         Returns
         -------
         int : correct response port
@@ -89,6 +100,8 @@ TINNITUS_CHOICES = {f'{f*1e-3:.1f}': f for f in TINNITUS_FREQUENCIES}
 
 class Tinnitus2AFCManager(BaseTrialManager):
 
+    default_group_name = 'Tinnitus 2AFC'
+
     default_parameters = [
         {
             'name': 'frequencies',
@@ -101,9 +114,18 @@ class Tinnitus2AFCManager(BaseTrialManager):
             'quote_values': False,
         },
         {
+            'name': 'noise_seed',
+            'label': 'Noise Seed',
+            'type': 'Result',
+        },
+        {
+            'name': 'nbn_frequency',
+            'label': 'NBN frequency (Hz)',
+            'type': 'Result',
+        },
+        {
             'name': 'stimuli',
             'label': 'Stimuli',
-            'group_name': 'Tinnitus 2AFC',
             'default': ['NBN', 'silence', 'SAM'],
             'scope': 'arbitrary',
             'type': 'MultiSelectParameter',
@@ -117,7 +139,6 @@ class Tinnitus2AFCManager(BaseTrialManager):
         {
             'name': 'reward_silent',
             'label': 'Reward silent trials?',
-            'group_name': 'Tinnitus 2AFC',
             'default': True,
             'scope': 'arbitrary',
             'type': 'BoolParameter',
@@ -125,7 +146,6 @@ class Tinnitus2AFCManager(BaseTrialManager):
         {
             'name': 'reward_rate',
             'label': 'Reward Rate (frac.)',
-            'group_name': 'Tinnitus 2AFC',
             'default': 1,
             'scope': 'arbitrary',
         },
@@ -229,20 +249,26 @@ class Tinnitus2AFCManager(BaseTrialManager):
         # Wrap in `str` because something is causing it to return a numpy dtype
         self.current_trial = next(self.stim_selector)
         self.current_seed = np.random.randint(0, 20)
+        if self.current_trial in ('NBN', 'SAM'):
+            self.current_seed = np.random.randint(0, 20)
+        else:
+            self.current_seed = None
         if self.current_trial == 'NBN':
             self.current_freq = next(self.freq_selector)
+        else:
+            self.current_freq = None
 
     def prepare_trial(self):
         repeat_mode = self.context.get_value('repeat_incorrect')
         if self.prior_response is None:
-            trial_repeat = False
+            trial_subtype = None
             self.advance_stim()
         elif repeat_mode == 1 and self.prior_response == 'early_np':
-            trial_repeat = True
+            trial_subtype = 'repeat'
         elif repeat_mode == 2 and self.prior_score != self.controller.scores.correct:
-            trial_repeat = True
+            trial_subtype = 'repeat'
         else:
-            trial_repeat = False
+            trial_subtype = None
             self.advance_stim()
 
         response_condition = self.stim_config[self.current_trial]['side']
@@ -255,11 +281,13 @@ class Tinnitus2AFCManager(BaseTrialManager):
             stim_info = f'{stim_info} seed={self.current_seed}'
         self.controller.trial_state_str = \
             f'Trial {self.trial_number + 1}, ' \
-            f'{"Repeat " if trial_repeat else ""}{stim_info}, ' \
+            f'{"Repeat " if trial_subtype is not None else ""}{stim_info}, ' \
             f'respond on {response_condition}'
 
-        trial_type = f'{self.current_trial}_repeat' if trial_repeat else self.current_trial
-        self.context.set_value('trial_type', trial_type)
+        self.context.set_value('trial_type', self.current_trial)
+        self.context.set_value('trial_subtype', trial_subtype)
+        self.context.set_value('noise_seed', self.current_seed)
+        self.context.set_value('nbn_frequency', self.current_freq)
 
         with self.output.engine.lock:
             if self.current_trial == 'NBN':
@@ -331,6 +359,7 @@ class GoNogoTrialManager(BaseTrialManager):
         # Attributes used to track state of trials
         self.prior_info = None, None
         self.trial_type = None
+        self.trial_subtype = None
         self.rng = np.random.default_rng()
         self.consecutive_nogo = 0
         self.current_stim = {}
@@ -346,48 +375,49 @@ class GoNogoTrialManager(BaseTrialManager):
         max_nogo = self.context.get_value('max_nogo')
 
         if self.trial_number < n_remind:
-            return 'go_remind'
+            return ('go', 'remind')
 
         if self.controller._remind_requested:
-            return 'go_remind'
+            return ('go', 'remind')
             self.controller._remind_requested = False
 
         if self.trial_number < (n_remind + n_warmup):
-            return 'go_remind' if self.rng.uniform() <= go_probability else 'nogo'
+            return ('go', 'remind') \
+                if self.rng.uniform() <= go_probability else ('nogo', None)
 
         if self.consecutive_nogo >= max_nogo:
-            return 'go_forced'
+            return ('go', 'forced')
 
         if repeat_mode != 0:
             ttype, resp, score = self.prior_info
             if repeat_mode == 1 and resp == 'early_np':
                 # early withdraw only
-                return ttype.split('_', 1)[0] + '_repeat'
+                return (ttype, 'repeat')
             if repeat_mode == 2 and score != self.controller.scores.correct:
                 # all incorrect trials
-                return ttype.split('_', 1)[0] + '_repeat'
-            if repeat_mode == 3 and ttype.startswith('nogo') and \
+                return (ttype, 'repeat')
+            if repeat_mode == 3 and ttype == 'nogo' and \
                     score != self.controller.scores.correct:
                 # Only FA trials
-                return ttype.split('_', 1)[0] + '_repeat'
+                return (ttype, 'repeat')
 
-        return 'go' if self.rng.uniform() <= go_probability else 'nogo'
+        return ('go', None) \
+            if self.rng.uniform() <= go_probability else ('nogo', None)
 
     def prepare_trial(self):
-        self.trial_type = self.next_ttype()
-        self.current_stim = self.next_stim(self.trial_type)
+        self.trial_type, self.trial_subtype = self.next_ttype()
+        self.current_stim = self.next_stim(self.trial_type, self.trial_subtype)
 
         # Update context with some information about trial and stim
         self.context.set_value('trial_type', self.trial_type)
+        self.context.set_value('trial_subtype', self.trial_subtype)
         self.context.set_values(self.current_stim)
 
         # Prepare a string representation for GUI
         stim_info = self.stim_info(self.current_stim)
-        if '_' in self.trial_type:
-            a, b = self.trial_type.split('_')
-            ttype_info = f'Trial {self.trial_number + 1}: {a} ({b})'
-        else:
-            ttype_info = f'Trial {self.trial_number + 1}: {self.trial_type}'
+        ttype_info = f'Trial {self.trial_number + 1}: {self.trial_type}'
+        if self.trial_subtype is not None:
+            ttype_info = f'{ttype_info} ({self.trial_subtype})'
         self.controller.trial_state_str = f'{ttype_info}{stim_info}'
 
         waveform = self.stim_waveform(self.current_stim)
@@ -453,7 +483,6 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
             'button_width': 40,
             'n_cols': 4,
         },
-
         {
             'name': 'frequency',
             'label': 'Frequency (kHz)',
@@ -474,7 +503,7 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
         self.frequencies = None
         self.levels = None
 
-    def next_stim(self, trial_type):
+    def next_stim(self, trial_type, trial_subtype):
         # First, check to see if any context values have changed and, if so,
         # update the selector.
         frequencies = self.context.get_value('frequency_list')
@@ -487,13 +516,16 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
             self.frequencies = frequencies
             self.levels = levels
 
-        if trial_type == 'go_remind':
-            # Should be an easy trial. Randomly pick from selected frequencies
-            # and use max level configured.
+        if trial_subtype == 'remind':
+            # Should be an easy go trial. Randomly pick from selected
+            # frequencies and use max level configured.
            return {
                'frequency': self.rng.choice(self.frequencies),
                'level': max(self.levels),
            }
+
+        if trial_subtype == 'repeat':
+            return self.current_stim
 
         if trial_type == 'nogo':
             return {
@@ -501,16 +533,13 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
                 'level': None,
             }
 
-        if trial_type in ('go', 'go_forced'):
+        if trial_type == 'go':
             freq, level = next(self.stim_selector)
             return {
                 'frequency': freq,
                 'level': level,
             }
 
-        if trial_type in ('nogo_repeat', 'go_repeat'):
-            # Don't change current_freq or current_level since we are repeating.
-            return self.current_stim
 
     def stim_info(self, stim):
         if stim['frequency'] is None:
