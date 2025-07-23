@@ -313,7 +313,7 @@ enamldef Main(MainWindow): main:
             ExperimentSequence:
                 padding = 0
                 paradigm_type = 'animal'
-                #start_enabled << bool(main.settings.animal) and bool(main.settings.experimenter)
+                start_enabled << bool(main.settings.animal) and bool(main.settings.experimenter)
                 sequence := main.settings.experiments
                 settings << main.settings
                 edit_mode << main.edit_mode
