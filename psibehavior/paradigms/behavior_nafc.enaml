@@ -30,19 +30,6 @@ def process_et(event):
         plugin.et_callback(name, edge, ts)
 
 
-def check_microphones(workbench, manifest):
-    controller = workbench.get_plugin('psi.controller')
-    data = workbench.get_plugin('psi.data')
-    channels = []
-    for engine in controller._engines.values():
-        engine_channels = engine.get_channels(mode='analog', direction='input', active=False)
-        channels.extend(engine_channels)
-
-    channel_names = [c.name for c in channels if 'microphone' in c.name]
-    manifest.input_list = channel_names
-    data._refresh_plots()
-
-
 def get_current_state(experiment_state, trial_state):
     if experiment_state == 'paused':
         return 'Experiment paused'
@@ -64,11 +51,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     * A timed trigger input called `sync_trigger`. This can either be connected
       to an analog or digital output.
     '''
-    initialized ::
-        deferred_call(check_microphones, workbench, manifest)
-
-    # Not to be populated manually (e.g., see `check_microphones`)?
-    attr input_list = []
+    attr microphone_names = ['microphone_1']
 
     #: Sets the name of the response inputs (e.g., `spout`, etc.). This is
     #: provided for backwards-compatibility with psilbhb which expects to see
@@ -185,10 +168,11 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     Extension:
         id = manifest.id + '.data'
         point = 'psi.data.sinks'
+
         BinaryStore:
             name = 'soundcard_data'
-            # Save the loopbacks
-            continuous_inputs = ['loopback_ttl', 'loopback_1', 'sync_trigger_in']
+            # Save the loopbacks and microphone signals
+            continuous_inputs = ['loopback_ttl', 'loopback_1', 'sync_trigger_in'] + manifest.microphone_names
 
         BinaryStore:
             # Make sure we save all the behavior data (IR sensors and
@@ -294,30 +278,36 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 label = 'Nose-poke start duration (s)'
                 compact_label = 'NP'
                 default = 0.25
+                scope = 'arbitrary'
             Parameter:
                 name = 'target_delay'
                 label = 'Target delay (s)'
                 default = 0.5
+                scope = 'arbitrary'
             Parameter:
                 name = 'hold_duration'
                 label = 'Nose-poke hold duration (s)'
                 compact_label = 'Hold'
                 default = 0.0
+                scope = 'arbitrary'
             Parameter:
                 name = 'response_duration'
                 label = 'Response duration (s)'
                 compact_label = 'Resp'
                 default = 3.0
+                scope = 'arbitrary'
             Parameter:
                 name = 'iti_duration'
                 label = 'Intertrial interval (s)'
                 compact_label = 'ITI'
                 default = 0.1
+                scope = 'arbitrary'
             Parameter:
                 name = 'to_duration'
                 label = 'Timeout duration (s)'
                 compact_label = 'TO'
                 default = 1.0
+                scope = 'arbitrary'
 
         ContextGroup:
             name = 'results'

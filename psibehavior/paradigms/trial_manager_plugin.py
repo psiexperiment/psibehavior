@@ -124,17 +124,22 @@ class Tinnitus2AFCManager(BaseTrialManager):
             'type': 'Result',
         },
         {
-            'name': 'stimuli',
-            'label': 'Stimuli',
-            'default': ['NBN', 'silence', 'SAM'],
+            'name': 'nbn_n',
+            'label': 'NBN per set',
+            'default': 5,
             'scope': 'arbitrary',
-            'type': 'MultiSelectParameter',
-            'quote_values': True,
-            'choices': {
-                'NBN': 'NBN',
-                'silence': 'silence',
-                'SAM': 'SAM',
-            },
+        },
+        {
+            'name': 'sam_n',
+            'label': 'SAM per set',
+            'default': 3,
+            'scope': 'arbitrary',
+        },
+        {
+            'name': 'silence_n',
+            'label': 'Silence per set',
+            'default': 2,
+            'scope': 'arbitrary',
         },
         {
             'name': 'reward_silent',
@@ -160,20 +165,17 @@ class Tinnitus2AFCManager(BaseTrialManager):
         # Attributes that need to be configured by `prepare_trial`.
         self.trial_state_str = ''
         self.prior_response = None
-        self.stim = None
+        self.stim_n = 0
         self.freq = None
 
         self.stim_config = {
             'NBN': {
-                'n': 5,
                 'side': 1,
             },
             'SAM': {
-                'n': 3,
                 'side': 2,
             },
             'silence': {
-                'n': 2,
                 'side': 2,
             },
         }
@@ -226,18 +228,20 @@ class Tinnitus2AFCManager(BaseTrialManager):
         self.waveforms['silence'] = np.zeros_like(self.waveforms['SAM', 0])
 
     def advance_stim(self):
-        stim = self.context.get_value('stimuli')
         freq = self.context.get_value('frequencies')
+        nbn_n = self.context.get_value('nbn_n')
+        sam_n = self.context.get_value('sam_n')
+        silence_n = self.context.get_value('silence_n')
+        n = nbn_n + sam_n + silence_n
+        if n == 0:
+            raise ValueError('Must have at least one stimulus configured')
 
-        if self.stim != stim:
+        if self.stim_n != (nbn_n, sam_n, silence_n):
             # Stim sequence has not been initialized or list of stimuli to test
-            # has changed.
-            log.info('Updating stimlus sequence')
-            stim_seq = []
-            for s in stim:
-                stim_seq.extend([s] * self.stim_config[s]['n'])
-            self.stim_selector = counterbalanced(stim_seq, n=20)
-            self.stim = stim
+            # has changed. Counterbalance across two "sets".
+            stim_seq = ['NBN'] * nbn_n + ['SAM'] * sam_n + ['silence'] * silence_n
+            self.stim_selector = counterbalanced(stim_seq, n=n*2)
+            self.stim_n = (nbn_n, sam_n, silence_n)
 
         if self.freq != freq:
             # Frequency sequence has not been initialized or list of
@@ -281,7 +285,7 @@ class Tinnitus2AFCManager(BaseTrialManager):
             stim_info = f'{stim_info} seed={self.current_seed}'
         self.controller.trial_state_str = \
             f'Trial {self.trial_number + 1}, ' \
-            f'{"Repeat " if trial_subtype is not None else ""}{stim_info}, ' \
+            f'{"repeat " if trial_subtype is not None else ""}{stim_info}, ' \
             f'respond on {response_condition}'
 
         self.context.set_value('trial_type', self.current_trial)
@@ -540,7 +544,6 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
                 'frequency': freq,
                 'level': level,
             }
-
 
     def stim_info(self, stim):
         if stim['frequency'] is None:

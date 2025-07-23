@@ -62,7 +62,7 @@ class NAFCAnalysisPlugin(Plugin):
             data = data.query('trial_subtype != "repeat"')
 
         self.results = \
-            data.groupby(self.grouping)['correct'].agg(agg) \
+            data.groupby(self.grouping, dropna=False)['correct'].agg(agg) \
                 .rename(columns=rename) \
                 .sort_index() \
                 .reset_index()

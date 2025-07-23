@@ -36,6 +36,7 @@ COMMON_PLUGINS = [
         },
     },
     {
+        # Make the speaker available to the behavior paradigms
         'manifest': 'cftscal.paradigms.objects.Speaker',
         'attrs': {
             'id': 'speaker_1',
@@ -44,6 +45,7 @@ COMMON_PLUGINS = [
         'required': True,
     },
     {
+        # Make the microphone available to the behavior paradigms
         'manifest': 'cftscal.paradigms.objects.Microphone',
         'attrs': {
             'id': 'microphone_1',
