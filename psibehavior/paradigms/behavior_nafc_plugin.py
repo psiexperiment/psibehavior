@@ -208,6 +208,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         self.trial_info = {
             'response_start': np.nan,
             'response_ts': np.nan,
+            'np_start': np.nan,
         }
         self.trial_state = NAFCTrialState.waiting_for_trial_start
 
@@ -251,7 +252,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             log.debug('Animal withdrew too early')
             self.stop_event_timer()
             self.trial_state = NAFCTrialState.waiting_for_np_start
-            del self.trial_info['np_start']
+            self.trial_info['np_start'] = np.nan
         elif event.category == 'np' and event.phase == 'elapsed':
             log.debug('Animal initiated trial')
             self.start_trial()
