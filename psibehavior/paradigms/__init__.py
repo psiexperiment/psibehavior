@@ -69,6 +69,11 @@ COMMON_PLUGINS = [
         'attrs': {},
         'required': True
     },
+    {
+        'manifest': PATH + 'logger.Logger',
+        'attrs': {},
+        'required': True,
+    },
 ]
 
 
