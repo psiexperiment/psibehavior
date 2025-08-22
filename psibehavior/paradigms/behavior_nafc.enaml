@@ -360,8 +360,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 text = 'Start Trial'
                 triggered ::
                     controller.request_trial()
-                enabled << controller.experiment_state == 'running' \
-                    and controller.manual_control
+                enabled << controller.experiment_state == 'running'
             Action:
                 separator = True
             Action:
