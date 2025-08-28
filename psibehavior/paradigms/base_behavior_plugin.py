@@ -23,15 +23,6 @@ class TrialState(enum.Enum):
     pass
 
 
-def process_et(event):
-    plugin = event.workbench.get_plugin('psi.controller')
-    name = event.parameters['name']
-    events = event.parameters['data'].events
-    for _, (edge, ts) in events[['event', 'ts']].iterrows():
-        plugin.et_callback(name, edge, ts)
-
-
-
 ################################################################################
 # Base controllers
 ################################################################################
@@ -97,7 +88,6 @@ class BaseBehaviorPlugin(ControllerPlugin):
             self.prepare_trial(auto_start=True)
 
     def et_callback(self, name, edge, event_time):
-        #log.debug('Detected {} on {} at {}'.format(edge, name, event_time))
         event = self.event_map[edge, name]
         self.handle_event(event, event_time)
 
