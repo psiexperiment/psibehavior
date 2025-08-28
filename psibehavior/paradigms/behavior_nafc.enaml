@@ -51,7 +51,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     * A timed trigger input called `sync_trigger`. This can either be connected
       to an analog or digital output.
     '''
-    attr microphone_names = ['microphone_1']
+    attr microphone_names = []
 
     #: Sets the name of the response inputs (e.g., `spout`, etc.). This is
     #: provided for backwards-compatibility with psilbhb which expects to see
