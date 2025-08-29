@@ -8,8 +8,8 @@ from enaml.core.api import Looper
 from enaml.layout.api import align, hbox, spacer, vbox
 from enaml.stdlib.message_box import critical
 from enaml.widgets.api import (
-    Action, CheckBox, Container, GroupBox, Field, FileDialogEx, Label,
-    MainWindow, Menu, MenuBar, ObjectCombo, PopupView, PushButton,
+    Action, ActionGroup, CheckBox, Container, GroupBox, Field, FileDialogEx,
+    Label, MainWindow, Menu, MenuBar, ObjectCombo, PopupView, PushButton,
 )
 
 from psi import get_config
@@ -212,6 +212,19 @@ enamldef Main(MainWindow): main:
                 text = 'Edit config'
                 checkable = True
                 checked := main.edit_mode
+        Menu:
+            title = '&Options'
+            Menu:
+                title = 'Logging Level'
+                ActionGroup:
+                    Looper:
+                        iterable = settings.get_member('logging_level').items
+                        Action:
+                            checkable = True
+                            text = loop_item
+                            checked ::
+                                settings.logging_level = loop_item
+                            checked << settings.logging_level == loop_item
 
     Container:
 
