@@ -2,9 +2,20 @@ from enaml.widgets.api import Action, Label
 from enaml.workbench.api import Extension
 
 from psi.context.api import Parameter
-from psi.controller.api import ExperimentAction, Trigger
+from psi.controller.api import ExperimentAction, ExperimentCallback, Trigger
 from psi.core.enaml.api import ExperimentManifest
 from psi.experiment.api import StatusItem
+from psi.data.sinks.api import TextStore
+
+
+def save_results(workbench, manifest):
+    data = workbench.get_plugin('psi.data')
+    sink = data.find_sink(manifest.id)
+    dispensed = workbench \
+        .get_plugin('psi.controller') \
+        .get_output(manifest.output_name) \
+        .total_fired
+    sink.save_mapping(manifest.id, {'n_dispensed': dispensed})
 
 
 ################################################################################
@@ -40,6 +51,19 @@ enamldef BaseRewardDispenser(ExperimentManifest): manifest:
                             .get_plugin('psi.controller') \
                             .get_output(manifest.output_name) \
                             .total_fired)
+
+    Extension:
+        id = manifest.id + '.data'
+        point = 'psi.data.sinks'
+        TextStore:
+            name = manifest.id
+
+    Extension:
+        id = manifest.id + '.base_actions'
+        point = 'psi.controller.actions'
+        ExperimentCallback:
+            event = 'experiment_end'
+            callback = lambda *args, **kw: save_results(workbench, manifest)
 
     Extension:
         id = manifest.id + '.toolbar'
@@ -105,4 +129,3 @@ enamldef PelletDispenser(BaseRewardDispenser): manifest:
             event = event_name
             command = f'{manifest.output_name}.fire'
             kwargs = {'duration': duration}
-

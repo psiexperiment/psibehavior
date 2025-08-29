@@ -15,10 +15,11 @@ from enaml.widgets.api import (CheckBox, Container, DockItem, Form, HGroup,
 from enaml.workbench.api import Extension, Plugin
 from enaml.workbench.core.api import Command
 
-from psi.controller.api import ExperimentAction
+from psi.controller.api import ExperimentAction, ExperimentCallback
 from psi.context.api import OrderedContextMeta
 from psi.core.enaml.api import DataFrameTable, ExperimentManifest
 from psi.data.api import DataFramePlot, PlotContainer, ViewBox
+from psi.data.sinks.api import TextStore
 from psi.experiment.api import ItemPreferences
 
 
@@ -75,6 +76,16 @@ EXTRA_COLUMNS = {
 }
 
 
+def save_results(workbench, manifest_id):
+    data = workbench.get_plugin('psi.data')
+    sink = data.find_sink(manifest_id)
+    plugin = workbench.get_plugin(manifest_id)
+    plugin.limit = 0
+    plugin.include_repeats = True
+    if plugin.results is not None:
+        sink.save_dataframe(manifest_id, plugin.results, index=False)
+
+
 enamldef NAFCAnalysisManifest(ExperimentManifest): manifest:
 
     id = 'nafc_anlaysis'
@@ -82,6 +93,13 @@ enamldef NAFCAnalysisManifest(ExperimentManifest): manifest:
     attr colors = {}
 
     factory = NAFCAnalysisPlugin
+
+    Extension:
+        id = manifest.id + '.data'
+        point = 'psi.data.sinks'
+
+        TextStore:
+            name = manifest.id
 
     Extension:
         id = manifest.id + '.items'
@@ -146,6 +164,9 @@ enamldef NAFCAnalysisManifest(ExperimentManifest): manifest:
         ExperimentAction:
             event = 'trial_end'
             command = manifest.id + '.update_analysis'
+        ExperimentCallback:
+            event = 'experiment_end'
+            callback = lambda *args, **kw: save_results(workbench, manifest.id)
 
     Extension:
         id = manifest.id + '.workspace'
