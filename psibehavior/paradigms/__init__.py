@@ -74,6 +74,11 @@ COMMON_PLUGINS = [
         'attrs': {},
         'required': True,
     },
+    {
+        'manifest': PATH + 'metadata.Metadata',
+        'attrs': {},
+        'required': True,
+    },
 ]
 
 

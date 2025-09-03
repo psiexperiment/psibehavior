@@ -1,0 +1,31 @@
+from enaml.workbench.api import Extension
+
+from psi.core.enaml.api import ExperimentManifest
+from psi.experiment.api import MetadataItem
+
+import psi.version
+import psiaudio.version
+import psivideo.version
+import psibehavior.version
+import cftscal.version
+
+
+enamldef Metadata(ExperimentManifest):
+
+    id = 'psibehavior.metadata'
+
+    Extension:
+        id = 'psibehavior.metadata'
+        point = 'psi.experiment.metadata'
+
+        MetadataItem:
+            name = 'version.psivideo'
+            value = psivideo.version.__version__
+
+        MetadataItem:
+            name = 'version.psibehavior'
+            value = psibehavior.version.__version__
+
+        MetadataItem:
+            name = 'version.cftscal'
+            value = cftscal.version.__version__
