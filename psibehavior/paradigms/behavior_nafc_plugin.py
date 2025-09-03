@@ -209,6 +209,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             'response_start': np.nan,
             'response_ts': np.nan,
             'np_start': np.nan,
+            'np_end': np.nan,
         }
         self.trial_state = NAFCTrialState.waiting_for_trial_start
 
@@ -284,6 +285,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         if event.category == 'np' and event.phase == 'end':
             # If animal withdraws during NP hold period, end trial.
             self.invoke_actions('response_end', timestamp)
+            self.trial_info['np_end'] = timestamp
             self.trial_info['response_ts'] = timestamp
             self.trial_info['response_side'] = np.nan
             self.end_trial('early_np', self.scores.invalid)
@@ -296,6 +298,11 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         # indicates animal initiated event and True indicates human initiated
         # event via button. See the definbition of the NAFCEvent enum.
         log.info(f'Waiting for response. Received {event} at {timestamp}')
+
+        # Record
+        if (self.trial_info['np_end'] is np.nan) \
+                and (event.category == 'np') and (event.phase == 'end'):
+            self.trial_info['np_end'] = timestamp
 
         if event == self.events.response_start:
             self.trial_info['response_start'] = timestamp
@@ -376,11 +383,15 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         log.info(f'Ending trial with {response} scored as {score}')
 
         response_time = self.trial_info['response_ts']-self.trial_info['trial_start']
+        reaction_time = self.trial_info['np_end'] - self.trial_info['trial_start']
+        np = self.trial_info['np_end'] - self.trial_info['np_start']
         self.trial_info.update({
             'response': response,
             'score': score.name,
             'correct': score == self.scores.correct,
             'response_time': response_time,
+            'reaction_time': reaction_time,
+            'np_actual_duration': np,
         })
         self.trial_info.update(self.context.get_values())
         self.invoke_actions('trial_end', ts, kw={'result': self.trial_info.copy()})

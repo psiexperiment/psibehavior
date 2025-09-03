@@ -342,6 +342,14 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 compact_label = 'T/'
                 dtype = 'float64'
             Result:
+                name = 'np_actual_duration'
+                compact_label = 'NP dur. (actual)'
+                dtype = 'float64'
+            Result:
+                name = 'reaction_time'
+                compact_label = 'React. time'
+                dtype = 'float64'
+            Result:
                 name = 'response_time'
                 compact_label = 'Resp. time'
                 dtype = 'float64'
