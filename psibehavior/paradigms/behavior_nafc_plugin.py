@@ -114,11 +114,14 @@ class BehaviorPlugin(BaseBehaviorPlugin):
     #: Stim managers
     stim_managers = List(Typed(BaseContinuousStimManager))
 
-    #: Enum indicating appropriate response. If -1, a response on any reward
-    #: port is acceptable and should be rewarded. If 0, a response on any port
-    #: is not acceptable and should not be rewarded. Greater than 0 indicates
-    #: that the particular numbered port is the correct response.
-    response_condition = Int(0)
+    #: List of ports to be scored as correct when a response is detected.
+    response_condition = List()
+
+    #: List of ports to be rewarded when a response is detected.
+    reward_condition = List()
+
+    #: List of ports to trigger a timeout when a response is detected.
+    timeout_condition = List()
 
     #: This needs to be dynamically generated since the events will depend on
     #: `N_response`.
@@ -214,7 +217,10 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         self.trial_state = NAFCTrialState.waiting_for_trial_start
 
         #: TODO: Allow for capturing additional info here.
-        self.response_condition = self.trial_manager.prepare_trial()
+        self.response_condition, \
+            self.reward_condition, \
+            self.timeout_condition =\
+            self.trial_manager.prepare_trial()
 
         # Now trigger any callbacks that are listening for the trial_ready
         # event.
@@ -307,8 +313,9 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         if event == self.events.response_start:
             self.trial_info['response_start'] = timestamp
             # If we are in training mode, deliver a reward preemptively
-            if self.context.get_value('training_mode') and (self.response_condition > 0):
-                self.invoke_actions(f'deliver_reward_{self.response_condition}', timestamp)
+            if self.context.get_value('training_mode') \
+                    and (len(self.reward_condition) == 1):
+                self.invoke_actions(f'deliver_reward_{self.reward_condition[0]}', timestamp)
             return
 
         if self.N_response == 1:
@@ -349,21 +356,14 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             if event.category == 'response' and event.phase == 'start':
                 self.trial_info['response_ts'] = timestamp
                 self.trial_info['response_side'] = event.side
-                if self.response_condition == -1:
-                    # This is a flag indicating that any of the response ports
-                    # can be the correct one.
+                if event.side in self.response_condition:
                     score = self.scores.correct
-                    if not self.context.get_value('training_mode'):
-                        self.invoke_actions(f'deliver_reward_{event.side}', timestamp)
-                elif self.trial_info['response_side'] == self.response_condition:
-                    score = self.scores.correct
-                    # If we are in training mode, the reward has already been
-                    # delivered.
-                    if not self.context.get_value('training_mode'):
-                        self.invoke_actions(f'deliver_reward_{event.side}', timestamp)
                 else:
                     score = self.scores.incorrect
                 response = f'{self.response_name}_{event.side}'
+                if not self.context.get_value('training_mode') and \
+                        event.side in self.reward_condition:
+                    self.invoke_actions(f'deliver_reward_{event.side}', timestamp)
             elif event.category == 'response' and event.phase == 'elapsed':
                 self.invoke_actions('response_end', timestamp)
                 self.trial_info['response_ts'] = np.nan
@@ -401,7 +401,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             # Early withdraw from nose-poke want to stop sound
             self.trial_manager.end_trial()
 
-        if score in (self.scores.incorrect, self.scores.invalid):
+        if self.trial_info['response_side'] in self.timeout_condition:
             if self.context.get_value('to_duration') > 0:
                 next_state = 'to'
             else:

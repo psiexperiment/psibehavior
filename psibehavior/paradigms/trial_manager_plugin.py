@@ -142,8 +142,8 @@ class Tinnitus2AFCManager(BaseTrialManager):
             'scope': 'arbitrary',
         },
         {
-            'name': 'reward_silent',
-            'label': 'Reward silent trials?',
+            'name': 'reward_punish_silent',
+            'label': 'Reward/Punish silent trials?',
             'default': True,
             'scope': 'arbitrary',
             'type': 'BoolParameter',
@@ -275,7 +275,18 @@ class Tinnitus2AFCManager(BaseTrialManager):
             trial_subtype = None
             self.advance_stim()
 
-        response_condition = self.stim_config[self.current_trial]['side']
+        side = self.stim_config[self.current_trial]['side']
+        if (self.current_trial == 'silence') and \
+                not self.context.get_value('reward_punish_silent'):
+                # Don't reward on a silent trial or punish
+            response_condition = [side]
+            reward_condition = []
+            timeout_condition = []
+        else:
+            response_condition = [side]
+            reward_condition = [side]
+            timeout_condition = [1, 2]
+            timeout_condition.remove(side)
 
         # Prepare a string representation for GUI
         stim_info = self.current_trial
@@ -302,7 +313,7 @@ class Tinnitus2AFCManager(BaseTrialManager):
                 waveform = self.waveforms[self.current_trial]
             self.output.set_waveform(waveform)
 
-        return response_condition
+        return response_condition, reward_condition, timeout_condition
 
     def start_trial(self, delay):
         with self.output.engine.lock:
@@ -428,7 +439,10 @@ class GoNogoTrialManager(BaseTrialManager):
         with self.output.engine.lock:
             self.output.set_waveform(waveform)
 
-        return 0 if self.trial_type.startswith('nogo') else 1
+        if self.trial_type.startswith('nogo'):
+            return [0], [0], [1]
+        else:
+            return [1], [1], [0]
 
     def start_trial(self, delay):
         with self.output.engine.lock:
