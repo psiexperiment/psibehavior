@@ -154,7 +154,11 @@ class Tinnitus2AFCManager(BaseTrialManager):
             'default': 1,
             'scope': 'arbitrary',
         },
-
+        {
+            'name': 'trial_rewarded',
+            'label': 'Trial rewarded?',
+            'type': 'Result',
+        },
     ]
 
     def __init__(self, controller):
@@ -167,6 +171,7 @@ class Tinnitus2AFCManager(BaseTrialManager):
         self.prior_response = None
         self.stim_n = 0
         self.freq = None
+        self.reward_rng = np.random.default_rng()
 
         self.stim_config = {
             'NBN': {
@@ -275,18 +280,29 @@ class Tinnitus2AFCManager(BaseTrialManager):
             trial_subtype = None
             self.advance_stim()
 
+        reward_rate = self.context.get_value('reward_rate')
+        reward_silent = self.context.get_value('reward_punish_silent')
         side = self.stim_config[self.current_trial]['side']
-        if (self.current_trial == 'silence') and \
-                not self.context.get_value('reward_punish_silent'):
-                # Don't reward on a silent trial or punish
+        if (self.current_trial == 'silence') and not reward_silent:
+            # Don't reward on a silent trial or punish
             response_condition = [side]
             reward_condition = []
             timeout_condition = []
-        else:
+            rewarded = False
+        elif self.reward_rng.uniform() < reward_rate:
+            # Reward the trial
             response_condition = [side]
             reward_condition = [side]
             timeout_condition = [1, 2]
             timeout_condition.remove(side)
+            rewarded = True
+        else:
+            # Don't reward the trial
+            response_condition = [side]
+            reward_condition = []
+            timeout_condition = [1, 2]
+            timeout_condition.remove(side)
+            rewarded = False
 
         # Prepare a string representation for GUI
         stim_info = self.current_trial
@@ -297,8 +313,10 @@ class Tinnitus2AFCManager(BaseTrialManager):
         self.controller.trial_state_str = \
             f'Trial {self.trial_number + 1}, ' \
             f'{"repeat " if trial_subtype is not None else ""}{stim_info}, ' \
-            f'respond on {response_condition}'
+            f'respond on {response_condition} ' \
+            f'{"" if rewarded else "(no reward)"}'
 
+        self.context.set_value('trial_rewarded', rewarded)
         self.context.set_value('trial_type', self.current_trial)
         self.context.set_value('trial_subtype', trial_subtype)
         self.context.set_value('noise_seed', self.current_seed)
