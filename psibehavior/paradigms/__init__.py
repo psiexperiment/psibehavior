@@ -82,6 +82,27 @@ COMMON_PLUGINS = [
 ]
 
 
+REWARD_1 = {
+    'manifest': PATH + 'reward.PelletDispenser',
+    'attrs': {'output_name': 'pellet_1', 'label': 'Pellet 1', 'event_name': 'deliver_reward_1'},
+    'required': True
+}
+
+
+REWARD_2 = {
+    'manifest': PATH + 'reward.PelletDispenser',
+    'attrs': {'output_name': 'pellet_2', 'label': 'Pellet 2', 'event_name': 'deliver_reward_2'},
+    'required': True
+}
+
+
+CUE = {
+    'manifest': PATH + 'cue.Light',
+    'attrs': {},
+    'required': True
+}
+
+
 ParadigmDescription(
     'tinnitus-2AFC', 'Tinnitus (2AFC with silence)', 'animal',
     COMMON_PLUGINS + [
@@ -89,23 +110,10 @@ ParadigmDescription(
         {'manifest': PATH + 'trial_manager.TrialManagerManifest',
          'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.Tinnitus2AFCManager'},
         },
+        REWARD_1,
+        REWARD_2,
+        CUE,
 
-        # Reward dispensers
-        {
-            'manifest': PATH + 'reward.PelletDispenser',
-            'attrs': {'output_name': 'pellet_1', 'label': 'Pellet 1', 'event_name': 'deliver_reward_1'},
-            'required': True
-        },
-        {
-            'manifest': PATH + 'reward.PelletDispenser',
-            'attrs': {'output_name': 'pellet_2', 'label': 'Pellet 2', 'event_name': 'deliver_reward_2'},
-            'required': True
-        },
-        {
-            'manifest': PATH + 'cue.Light',
-            'attrs': {},
-            'required': True
-        },
         {
             'manifest': 'psibehavior.paradigms.nafc_analysis.NAFCAnalysisManifest',
             'required': True,
@@ -122,12 +130,7 @@ ParadigmDescription(
         {'manifest': PATH + 'trial_manager.TrialManagerManifest',
          'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.HyperacusisGoNogoManager'},
         },
-        # Reward dispenser
-        {
-            'manifest': PATH + 'reward.PelletDispenser',
-            'attrs': {'output_name': 'pellet_1', 'label': 'Pellet 1', 'event_name': 'deliver_reward_1'},
-            'required': True
-        },
+        REWARD_1,
         {
             'manifest': 'psibehavior.paradigms.sdt_analysis.SDTAnalysisManifest',
             'required': True,
@@ -145,14 +148,11 @@ ParadigmDescription(
          'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.WavGoNogoManager'},
         },
         {'manifest': PATH + 'trial_manager.ContinuousStimManagerManifest',
-         'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.Silence'},
+         'attrs': {
+             'manager_path': 'psibehavior.paradigms.trial_manager_plugin.Silence',
+             'manager_kwargs': {'output_names': ['continuous_output_1']},
+         },
         },
-
-        # Reward dispenser
-        {
-            'manifest': PATH + 'reward.PelletDispenser',
-            'attrs': {'output_name': 'pellet_1', 'label': 'Pellet 1', 'event_name': 'deliver_reward_1'},
-            'required': True
-        },
+        REWARD_1,
     ],
 )
