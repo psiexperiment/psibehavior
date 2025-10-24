@@ -11,7 +11,7 @@ from psi.context.api import (
     BoolParameter, EnumParameter, ContextGroup, ContextRow, Parameter, Result
 )
 from psi.controller.api import (
-    ContinuousInput, ContinuousOutput, ControllerManifest, EpochOutput,
+    ContinuousInput, ContinuousCallbackOutput, ControllerManifest, EpochOutput,
     ExperimentAction, ExperimentEvent, ExperimentState
 )
 from psi.data.sinks.api import EventLog
@@ -194,7 +194,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             # Create an epoch and continous output for each speaker channel.
             iterable = range(N_output)
 
-            ContinuousOutput:
+            ContinuousCallbackOutput:
                 name = f'continuous_output_{loop_item+1}'
                 label = f'Continuous Output {loop_item+1}'
                 target_name = f'hw_ao::speaker_{loop_item+1}'

@@ -60,6 +60,7 @@ enamldef TrialManagerManifest(ExperimentManifest): manifest:
 
     id = manifest.manager_path
     attr manager_path
+
     required = True
 
     #: Prefix to add to names that will be shown in GUI.
@@ -87,11 +88,15 @@ enamldef TrialManagerManifest(ExperimentManifest): manifest:
 
 
 def configure_stim_manager(manifest, event):
+    # Find the manager class instance
     controller = event.workbench.get_plugin('psi.controller')
     module_path, class_name = manifest.manager_path.rsplit('.', 1)
     module = importlib.import_module(module_path)
     manager_class = getattr(module, class_name)
-    controller.stim_managers.append(manager_class(controller))
+
+    # Initialize it and attach it to the controller
+    manager_instance = manager_class(controller, **manifest.manager_kwargs)
+    controller.stim_managers.append(manager_instance)
 
 
 enamldef ContinuousStimManagerManifest(ExperimentManifest): manifest:
@@ -100,6 +105,9 @@ enamldef ContinuousStimManagerManifest(ExperimentManifest): manifest:
 
     #: Full path to the manager class
     attr manager_path
+
+    #: Keyword arguments that can be used to customize the manager.
+    attr manager_kwargs = {}
 
     required = True
 

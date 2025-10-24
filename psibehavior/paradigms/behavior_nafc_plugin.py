@@ -108,10 +108,12 @@ class BehaviorPlugin(BaseBehaviorPlugin):
     #: regarding the trial.
     trial_state_str = Str('')
 
-    #: Trial object
+    #: Trial object. Responsible for managing the trial structure and
+    #: generating waveforms for the trials.
     trial_manager = Typed(BaseTrialManager)
 
-    #: Stim managers
+    #: Stim managers. Responsible for generating continuous stimuli that are
+    #: played throughout.
     stim_managers = List(Typed(BaseContinuousStimManager))
 
     #: List of ports to be scored as correct when a response is detected.

@@ -8,7 +8,8 @@ import numpy as np
 
 from psi.context.api import counterbalanced, shuffled_set
 from psiaudio.stim import bandlimited_noise, bandlimited_fir_noise, apply_cos2envelope, apply_sam_envelope
-from psiaudio.stim import silence, ramped_tone
+
+from psiaudio.stim import silence, stm, ramped_tone, BandlimitedFIRNoiseFactory
 from psiaudio.util import octave_band_freqs, octave_space
 
 
@@ -23,25 +24,53 @@ class BaseContinuousStimManager:
     #: `group_name`, must be provided for each parameter.
     default_group_name = None
 
-    def __init__(self, controller):
+    def __init__(self, controller, output_names):
         self.controller = controller
         self.context = controller.context
+
+        # Link the output to the callback.
+        outputs = {}
+        for output_name in output_names:
+            output = controller.get_output(output_name)
+            output.callback = self.next
+            output.active = True
+            outputs[output_name] = output
+        self.outputs = outputs
 
     def initialize(self):
         raise NotImplementedError
 
     def next(self, samples, channel):
+        # If channel is not None, return a N dimensional array since the code
+        # wants to set all channels at once.
         raise NotImplementedError
 
 
-class FIRBandlimitedNoise(BaseContinuousStimManager):
+class Silence(BaseContinuousStimManager):
 
-    def __init__(self, controller):
-        super().__init__(controller)
+    def __init__(self, controller, output_names):
+        super().__init__(controller, output_names)
 
-
-    def next(self, samples, channel):
+    def next(self, samples, output):
         return np.zeros(samples)
+
+
+class BandlimitedFIRNoise(BaseContinuousStimManager):
+
+    def __init__(self, controller, output_names):
+        super().__init__(controller, output_names)
+        self.factories = {}
+        for name, output in self.outputs.items():
+            self.factories[name] = BandlimitedFIRNoiseFactory(
+                fs=output.fs,
+                fl=0.5e3,
+                fh=16e3,
+                level=60,
+                calibration=output.calibration,
+            )
+
+    def next(self, samples, output):
+        return self.factories[output].next(samples)
 
 
 class BaseTrialManager:
@@ -595,59 +624,191 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
         )
 
 
-class WavGoNogoManager(GoNogoTrialManager):
+class NAFCTrialManager(BaseTrialManager):
+
+    def __init__(self, controller):
+        super().__init__(controller)
+        self.prior_response = None
+        self.prior_score = None
+        self.rng = np.random.default_rng()
+
+    def prepare_trial(self):
+        repeat_mode = self.context.get_value('repeat_incorrect')
+        if self.prior_response is None:
+            trial_subtype = None
+            self.current_stim = self.next_stim()
+        elif repeat_mode == 1 and self.prior_response == 'early_np':
+            trial_subtype = 'repeat'
+        elif repeat_mode == 2 and self.prior_score != self.controller.scores.correct:
+            trial_subtype = 'repeat'
+        else:
+            trial_subtype = None
+            self.current_stim = self.next_stim()
+
+        self.context.set_values(self.current_stim)
+        self.controller.trial_state_str = self.get_trial_state_str(self.current_stim)
+        waveform = self.stim_waveform(self.current_stim)
+        with self.output.engine.lock:
+            self.output.set_waveform(waveform)
+        return self.get_conditions(self.current_stim)
+
+    def start_trial(self, delay):
+        with self.output.engine.lock:
+            ts = self.controller.get_ts()
+            self.output.start_waveform(ts + delay)
+            self.sync_trigger.trigger(ts + delay, 0.1)
+        return ts
+
+    def end_trial(self, delay=0):
+        with self.output.engine.lock:
+            ts = self.controller.get_ts()
+            self.output.stop_waveform(ts + delay)
+
+    def trial_complete(self, response, score, info):
+        self.prior_response = response
+        self.prior_score = score
+        self.trial_number += 1
+
+
+class ModulationTask(NAFCTrialManager):
 
     default_group_name = 'Stimuli'
 
     default_parameters = [
         {
-            'name': 'level',
-            'label': 'Level (dB SPL)',
-            'default': 80,
+            'name': 'fc_list',
+            'label': 'Noise center frequencies (kHz)',
+            'default': ['8'],
+            'scope': 'arbitrary',
+            'type': 'MultiSelectParameter',
+            'choices': {str(f): f for f in [1, 2, 4, 8, 16, 32]},
+            'quote_values': False,
+            'button_width': 40,
+            'n_cols': 6,
         },
-    ] + GoNogoTrialManager.default_parameters
+        {
+            'name': 'stm_depth_list',
+            'label': 'STM depths (dB)',
+            'default': ['24'],
+            'scope': 'arbitrary',
+            'type': 'MultiSelectParameter',
+            'choices': {str(d): d for d in [3, 6, 9, 12, 15, 18, 21, 24]},
+            'quote_values': False,
+            'button_width': 40,
+            'n_cols': 4,
+        },
+        {
+            'name': 'bw',
+            'label': 'Bandwidth (octaves)',
+            'default': 1,
+            'scope': 'arbitrary',
+        },
+        {
+            'name': 'cpo',
+            'label': 'Ripple (cycles per octave)',
+            'default': 2,
+            'scope': 'arbitrary',
+        },
+        {
+            'name': 'cps',
+            'label': 'Temporal rate (Hz)',
+            'default': 4,
+            'scope': 'arbitrary',
+        },
+        {
+            'name': 'center_level',
+            'label': 'Center level (dB SPL)',
+            'default': 60,
+            'scope': 'arbitrary',
+        },
+        {
+            'name': 'level_range',
+            'label': 'Level range (dB)',
+            'default': 10,
+            'scope': 'arbitrary',
+        },
+        {
+            'name': 'rise_time',
+            'label': 'Envelope rise time (sec)',
+            'default': 25e-3,
+            'scope': 'arbitrary',
+        },
+        {
+            'name': 'stm_depth',
+            'label': 'STM depth',
+            'type': 'Result',
+        },
+        {
+            'name': 'fc',
+            'label': 'Fc (kHz)',
+            'type': 'Result',
+        },
+        {
+            'name': 'actual_level',
+            'label': 'Level (dB SPL)',
+            'type': 'Result',
+        },
+    ]
 
     def __init__(self, controller):
         super().__init__(controller)
         self.output = self.controller.get_output('output_1')
         self.sync_trigger = self.controller.get_output('sync_trigger_out')
+        self.stm_depth_list = []
+        self.fc_list = []
 
-    def next_stim(self, trial_type):
-        if (self.frequencies != frequencies) or (self.levels != levels):
-            # Regenerate stim sequence
-            sequence = list(itertools.product(frequencies, levels))
-            self.stim_selector = shuffled_set(sequence)
-            self.frequencies = frequencies
-            self.levels = levels
+    def next_stim(self):
+        # Check if any of the roving values have changed and update the
+        # selectors as needed 
+        stm_depth_list = self.context.get_value('stm_depth_list')
+        fc_list = self.context.get_value('fc_list')
+        if self.stm_depth_list != stm_depth_list:
+            self.stm_depth_selector = counterbalanced(stm_depth_list, len(stm_depth_list) * 2)
+            self.stm_depth_list = stm_depth_list
+        if self.fc_list != fc_list:
+            self.fc_selector = counterbalanced(fc_list, len(fc_list) * 4)
+            self.fc_list = fc_list
+        # Calculate the next depth and center frequency
+        stm_depth = 0 if self.rng.uniform() < 0.5 else next(self.stm_depth_selector)
+        fc = next(self.fc_selector)
+        trial_type = 'reference' if stm_depth == 0 else 'target'
+        level_range = self.context.get_value('level_range')
+        level = self.context.get_value('center_level')
+        actual_level = int(level + self.rng.uniform(-level_range / 2, level_range / 2))
+        return {
+            'stm_depth': stm_depth,
+            'fc': fc,
+            'trial_type': trial_type,
+            'actual_level': actual_level,
+        }
 
-        if trial_type == 'go_remind':
-            # Should be an easy trial. Randomly pick from selected frequencies
-            # and use max level configured.
-            return next(self.stim_selector)
+    def get_trial_state_str(self, stim):
+        return f'{stim["trial_type"].capitalize()}: ' \
+            f'depth {stim["stm_depth"]} dB, Fc {stim["fc"]} Hz, level {stim["actual_level"]} dB SPL'
 
-        if trial_type == 'nogo':
-            return {}
-
-        if trial_type in ('go', 'go_forced'):
-            return next(self.stim_selector)
-
-        if trial_type in ('nogo_repeat', 'go_repeat'):
-            # Repeat current stim.
-            return self.current_stim
-
-    def stim_info(self, stim):
-        if stim['frequency'] is None:
-            return ''
-        return f' {stim["frequency"]*1e-3:.1f} Hz, {stim["level"]:.0f} dB SPL'
+    def get_conditions(self, stim):
+        side = 1 if stim['stm_depth'] == 0 else 2
+        response_condition = [side]
+        reward_condition = [side]
+        timeout_condition = [1, 2]
+        timeout_condition.remove(side)
+        return response_condition, reward_condition, timeout_condition
 
     def stim_waveform(self, stim):
-        if stim['frequency'] is None:
-            return silence(fs=self.output.fs, duration=1)
-        return ramped_tone(
-            **stim,
+        waveform = stm(
+            frequency={'fc': stim['fc'] * 1e3, 'octaves': self.context.get_value('bw')},
+            depth=stim['stm_depth'],
+            cpo=self.context.get_value('cpo'),
+            cps=self.context.get_value('cps'),
             fs=self.output.fs,
-            calibration=self.output.calibration,
             duration=1,
-            window='cosine-squared',
-            rise_time=25e-3,
+            mod_type='exp',
+            calibration=self.output.calibration,
+            level=stim['actual_level'],
         )
+        waveform = apply_cos2envelope(
+            waveform,
+            fs=self.output.fs,
+            rise_time=self.context.get_value('rise_time'),
+        )
+        return waveform

@@ -65,6 +65,18 @@ COMMON_PLUGINS = [
         'required': True,
     },
     {
+        'manifest': 'psi.paradigms.core.signal_mixins.MultiSignalFFTViewManifest',
+        'attrs': {
+            'id': 'loopback_1_fft_view',
+            'title': 'Loopback FFT',
+            'sources': {
+                'loopback_1': {'color': 'black', 'apply_calibration': True},
+            },
+            'fft_freq_lb': 1e2,
+        },
+        'required': True,
+    },
+    {
         'manifest': PATH + 'timeout.Light',
         'attrs': {},
         'required': True
@@ -124,6 +136,27 @@ ParadigmDescription(
 
 
 ParadigmDescription(
+    'modulation-2AFC', 'Modulation detection (2AFC)', 'animal',
+    COMMON_PLUGINS + [
+        {'manifest': PATH + 'behavior_nafc.BehaviorManifest', 'attrs': {'N_response': 2, 'N_output': 1}},
+        {'manifest': PATH + 'trial_manager.TrialManagerManifest',
+         'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.ModulationTask'},
+        },
+        REWARD_1,
+        REWARD_2,
+        CUE,
+
+        {
+            'manifest': 'psibehavior.paradigms.nafc_analysis.NAFCAnalysisManifest',
+            'required': True,
+            'attrs': {'colors': COLORS,},
+        },
+    ],
+)
+
+
+
+ParadigmDescription(
     'hyperacusis', 'Hyperacusis (go/nogo)', 'animal',
     COMMON_PLUGINS + [
         {'manifest': PATH + 'behavior_nafc.BehaviorManifest', 'attrs': {'N_response': 1, 'N_output': 1}},
@@ -136,23 +169,5 @@ ParadigmDescription(
             'required': True,
             'attrs': {'colors': COLORS,},
         },
-    ],
-)
-
-
-ParadigmDescription(
-    'signal-in-noise', 'Signal in noise (go/nogo)', 'animal',
-    COMMON_PLUGINS + [
-        {'manifest': PATH + 'behavior_nafc.BehaviorManifest', 'attrs': {'N_response': 1, 'N_output': 1}},
-        {'manifest': PATH + 'trial_manager.TrialManagerManifest',
-         'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.WavGoNogoManager'},
-        },
-        {'manifest': PATH + 'trial_manager.ContinuousStimManagerManifest',
-         'attrs': {
-             'manager_path': 'psibehavior.paradigms.trial_manager_plugin.Silence',
-             'manager_kwargs': {'output_names': ['continuous_output_1']},
-         },
-        },
-        REWARD_1,
     ],
 )
