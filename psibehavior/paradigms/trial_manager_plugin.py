@@ -795,8 +795,14 @@ class ModulationTask(NAFCTrialManager):
         return response_condition, reward_condition, timeout_condition
 
     def stim_waveform(self, stim):
+        frequency = {
+            'fc': stim['fc'] * 1e3,
+            'octaves': self.context.get_value('bw'),
+            'rolloff_octaves': 0.25,
+            'rolloff': 16,
+        }
         waveform = stm(
-            frequency={'fc': stim['fc'] * 1e3, 'octaves': self.context.get_value('bw')},
+            frequency=frequency,
             depth=stim['stm_depth'],
             cpo=self.context.get_value('cpo'),
             cps=self.context.get_value('cps'),
