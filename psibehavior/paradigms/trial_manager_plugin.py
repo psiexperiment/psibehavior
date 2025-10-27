@@ -645,6 +645,7 @@ class NAFCTrialManager(BaseTrialManager):
             trial_subtype = None
             self.current_stim = self.next_stim()
 
+        self.context.set_value('trial_subtype', trial_subtype)
         self.context.set_values(self.current_stim)
         self.controller.trial_state_str = self.get_trial_state_str(self.current_stim)
         waveform = self.stim_waveform(self.current_stim)
