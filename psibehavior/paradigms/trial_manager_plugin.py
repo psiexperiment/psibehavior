@@ -699,6 +699,12 @@ class ModulationTask(NAFCTrialManager):
             'n_cols': 4,
         },
         {
+            'name': 'target_probability',
+            'label': 'Target prob. (frac.)',
+            'default': 0.5,
+            'scope': 'arbitrary',
+        },
+        {
             'name': 'bw',
             'label': 'Bandwidth (octaves)',
             'default': 1,
@@ -769,8 +775,10 @@ class ModulationTask(NAFCTrialManager):
         if self.fc_list != fc_list:
             self.fc_selector = counterbalanced(fc_list, len(fc_list) * 4)
             self.fc_list = fc_list
+        target_probability = self.context.get_value('target_probability')
+
         # Calculate the next depth and center frequency
-        stm_depth = 0 if self.rng.uniform() < 0.5 else next(self.stm_depth_selector)
+        stm_depth = 0 if self.rng.uniform() >= target_probability else next(self.stm_depth_selector)
         fc = next(self.fc_selector)
         trial_type = 'reference' if stm_depth == 0 else 'target'
         level_range = self.context.get_value('level_range')
