@@ -125,7 +125,6 @@ ParadigmDescription(
         REWARD_1,
         REWARD_2,
         CUE,
-
         {
             'manifest': 'psibehavior.paradigms.nafc_analysis.NAFCAnalysisManifest',
             'required': True,
@@ -144,8 +143,6 @@ ParadigmDescription(
         },
         REWARD_1,
         REWARD_2,
-        CUE,
-
         {
             'manifest': 'psibehavior.paradigms.nafc_analysis.NAFCAnalysisManifest',
             'required': True,
