@@ -24,9 +24,16 @@ class BaseContinuousStimManager:
     #: `group_name`, must be provided for each parameter.
     default_group_name = None
 
-    def __init__(self, controller, output_names):
+    def get_value(self, value_name, *args, **kw):
+        '''
+        Get value of parameter, applying prefix if needed
+        '''
+        return self.context.get_value(f'{self.prefix}{value_name}', *args, **kw)
+
+    def __init__(self, controller, output_names, prefix=''):
         self.controller = controller
         self.context = controller.context
+        self.prefix = prefix
 
         # Link the output to the callback.
         outputs = {}
@@ -48,8 +55,8 @@ class BaseContinuousStimManager:
 
 class Silence(BaseContinuousStimManager):
 
-    def __init__(self, controller, output_names):
-        super().__init__(controller, output_names)
+    def __init__(self, controller, output_names, prefix=''):
+        super().__init__(controller, output_names, prefix)
 
     def next(self, samples, output):
         return np.zeros(samples)
@@ -57,19 +64,48 @@ class Silence(BaseContinuousStimManager):
 
 class BandlimitedFIRNoise(BaseContinuousStimManager):
 
-    def __init__(self, controller, output_names):
-        super().__init__(controller, output_names)
+    default_parameters = [
+        {
+            'name': 'masker_fl',
+            'label': 'Lower Freq. (kHz)',
+            'default': 0.5,
+            'scope': 'experiment',
+        },
+        {
+            'name': 'masker_fh',
+            'label': 'Upper Freq. (kHz)',
+            'default': 16,
+            'scope': 'experiment',
+        },
+        {
+            'name': 'masker_level',
+            'label': 'Level (dB SPL)',
+            'scope': 'arbitrary',
+            'default': 20,
+        },
+    ]
+
+    default_group_name = 'Bandlimited FIR noise masker'
+
+    def __init__(self, controller, output_names, prefix=''):
+        super().__init__(controller, output_names, prefix)
         self.factories = {}
+        self.level = self.get_value('masker_level')
+
         for name, output in self.outputs.items():
             self.factories[name] = BandlimitedFIRNoiseFactory(
                 fs=output.fs,
-                fl=0.5e3,
-                fh=16e3,
-                level=60,
+                fl=self.get_value('masker_fl')*1e3,
+                fh=self.get_value('masker_fh')*1e3,
+                level=self.level,
                 calibration=output.calibration,
             )
 
+
     def next(self, samples, output):
+        if self.level != (level := self.get_value('masker_level')):
+            self.level = level
+            self.factories[output].update_level(self.level)
         return self.factories[output].next(samples)
 
 
@@ -84,10 +120,17 @@ class BaseTrialManager:
     #: `group_name`, must be provided for each parameter.
     default_group_name = None
 
-    def __init__(self, controller):
+    def __init__(self, controller, prefix=''):
         self.controller = controller
         self.context = controller.context
+        self.prefix = prefix
         self.trial_number = 0
+
+    def get_value(self, value_name, *args, **kw):
+        '''
+        Get value of parameter, applying prefix if needed
+        '''
+        return self.context.get_value(f'{self.prefix}{value_name}', *args, **kw)
 
     def prepare_trial(self):
         '''
@@ -190,8 +233,8 @@ class Tinnitus2AFCManager(BaseTrialManager):
         },
     ]
 
-    def __init__(self, controller):
-        super().__init__(controller)
+    def __init__(self, controller, prefix=''):
+        super().__init__(controller, prefix)
         self.output = self.controller.get_output('output_1')
         self.sync_trigger = self.controller.get_output('sync_trigger_out')
 
@@ -262,10 +305,10 @@ class Tinnitus2AFCManager(BaseTrialManager):
         self.waveforms['silence'] = np.zeros_like(self.waveforms['SAM', 0])
 
     def advance_stim(self):
-        freq = self.context.get_value('frequencies')
-        nbn_n = self.context.get_value('nbn_n')
-        sam_n = self.context.get_value('sam_n')
-        silence_n = self.context.get_value('silence_n')
+        freq = self.get_value('frequencies')
+        nbn_n = self.get_value('nbn_n')
+        sam_n = self.get_value('sam_n')
+        silence_n = self.get_value('silence_n')
         n = nbn_n + sam_n + silence_n
         if n == 0:
             raise ValueError('Must have at least one stimulus configured')
@@ -297,7 +340,7 @@ class Tinnitus2AFCManager(BaseTrialManager):
             self.current_freq = None
 
     def prepare_trial(self):
-        repeat_mode = self.context.get_value('repeat_incorrect')
+        repeat_mode = self.get_value('repeat_incorrect')
         if self.prior_response is None:
             trial_subtype = None
             self.advance_stim()
@@ -309,8 +352,8 @@ class Tinnitus2AFCManager(BaseTrialManager):
             trial_subtype = None
             self.advance_stim()
 
-        reward_rate = self.context.get_value('reward_rate')
-        reward_silent = self.context.get_value('reward_punish_silent')
+        reward_rate = self.get_value('reward_rate')
+        reward_silent = self.get_value('reward_punish_silent')
         side = self.stim_config[self.current_trial]['side']
         if (self.current_trial == 'silence') and not reward_silent:
             # Don't reward on a silent trial or punish
@@ -416,8 +459,8 @@ class GoNogoTrialManager(BaseTrialManager):
 
     default_parameters = GONOGO_PARAMETERS
 
-    def __init__(self, controller):
-        super().__init__(controller)
+    def __init__(self, controller, prefix=''):
+        super().__init__(controller, prefix)
         # Attributes used to track state of trials
         self.prior_info = None, None
         self.trial_type = None
@@ -430,11 +473,11 @@ class GoNogoTrialManager(BaseTrialManager):
         '''
         Determine next trial type.
         '''
-        n_remind = self.context.get_value('remind_trials')
-        n_warmup = self.context.get_value('warmup_trials')
-        go_probability = self.context.get_value('go_probability')
-        repeat_mode = self.context.get_value('repeat_incorrect')
-        max_nogo = self.context.get_value('max_nogo')
+        n_remind = self.get_value('remind_trials')
+        n_warmup = self.get_value('warmup_trials')
+        go_probability = self.get_value('go_probability')
+        repeat_mode = self.get_value('repeat_incorrect')
+        max_nogo = self.get_value('max_nogo')
 
         if self.trial_number < n_remind:
             return ('go', 'remind')
@@ -561,8 +604,8 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
         },
     ] + GoNogoTrialManager.default_parameters
 
-    def __init__(self, controller):
-        super().__init__(controller)
+    def __init__(self, controller, prefix=''):
+        super().__init__(controller, prefix)
         self.output = self.controller.get_output('output_1')
         self.sync_trigger = self.controller.get_output('sync_trigger_out')
         # Attributes that need to be configured by `prepare_trial`.
@@ -572,8 +615,8 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
     def next_stim(self, trial_type, trial_subtype):
         # First, check to see if any context values have changed and, if so,
         # update the selector.
-        frequencies = self.context.get_value('frequency_list')
-        levels = self.context.get_value('level_list')
+        frequencies = self.get_value('frequency_list')
+        levels = self.get_value('level_list')
 
         if (self.frequencies != frequencies) or (self.levels != levels):
             # Regenerate stim sequence
@@ -626,14 +669,14 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
 
 class NAFCTrialManager(BaseTrialManager):
 
-    def __init__(self, controller):
-        super().__init__(controller)
+    def __init__(self, controller, prefix=''):
+        super().__init__(controller, prefix)
         self.prior_response = None
         self.prior_score = None
         self.rng = np.random.default_rng()
 
     def prepare_trial(self):
-        repeat_mode = self.context.get_value('repeat_incorrect')
+        repeat_mode = self.get_value('repeat_incorrect')
         if self.prior_response is None:
             trial_subtype = None
             self.current_stim = self.next_stim()
@@ -757,8 +800,8 @@ class ModulationTask(NAFCTrialManager):
         },
     ]
 
-    def __init__(self, controller):
-        super().__init__(controller)
+    def __init__(self, controller, prefix=''):
+        super().__init__(controller, prefix)
         self.output = self.controller.get_output('output_1')
         self.sync_trigger = self.controller.get_output('sync_trigger_out')
         self.stm_depth_list = []
@@ -767,22 +810,22 @@ class ModulationTask(NAFCTrialManager):
     def next_stim(self):
         # Check if any of the roving values have changed and update the
         # selectors as needed 
-        stm_depth_list = self.context.get_value('stm_depth_list')
-        fc_list = self.context.get_value('fc_list')
+        stm_depth_list = self.get_value('stm_depth_list')
+        fc_list = self.get_value('fc_list')
         if self.stm_depth_list != stm_depth_list:
             self.stm_depth_selector = counterbalanced(stm_depth_list, len(stm_depth_list) * 2)
             self.stm_depth_list = stm_depth_list
         if self.fc_list != fc_list:
             self.fc_selector = counterbalanced(fc_list, len(fc_list) * 4)
             self.fc_list = fc_list
-        target_probability = self.context.get_value('target_probability')
+        target_probability = self.get_value('target_probability')
 
         # Calculate the next depth and center frequency
         stm_depth = 0 if self.rng.uniform() >= target_probability else next(self.stm_depth_selector)
         fc = next(self.fc_selector)
         trial_type = 'reference' if stm_depth == 0 else 'target'
-        level_range = self.context.get_value('level_range')
-        level = self.context.get_value('center_level')
+        level_range = self.get_value('level_range')
+        level = self.get_value('center_level')
         actual_level = int(level + self.rng.uniform(-level_range / 2, level_range / 2))
         return {
             'stm_depth': stm_depth,
@@ -806,15 +849,15 @@ class ModulationTask(NAFCTrialManager):
     def stim_waveform(self, stim):
         frequency = {
             'fc': stim['fc'] * 1e3,
-            'octaves': self.context.get_value('bw'),
+            'octaves': self.get_value('bw'),
             'rolloff_octaves': 0.25,
             'rolloff': 16,
         }
         waveform = stm(
             frequency=frequency,
             depth=stim['stm_depth'],
-            cpo=self.context.get_value('cpo'),
-            cps=self.context.get_value('cps'),
+            cpo=self.get_value('cpo'),
+            cps=self.get_value('cps'),
             fs=self.output.fs,
             duration=1,
             mod_type='exp',
@@ -824,6 +867,6 @@ class ModulationTask(NAFCTrialManager):
         waveform = apply_cos2envelope(
             waveform,
             fs=self.output.fs,
-            rise_time=self.context.get_value('rise_time'),
+            rise_time=self.get_value('rise_time'),
         )
         return waveform

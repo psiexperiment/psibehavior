@@ -141,6 +141,13 @@ ParadigmDescription(
         {'manifest': PATH + 'trial_manager.TrialManagerManifest',
          'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.ModulationTask'},
         },
+        {'manifest': PATH + 'trial_manager.ContinuousStimManagerManifest',
+         'attrs': {
+             'manager_path': 'psibehavior.paradigms.trial_manager_plugin.BandlimitedFIRNoise',
+             'manager_kwargs': {'output_names': ['continuous_output_1']},
+         },
+         'required': True,
+        },
         REWARD_1,
         REWARD_2,
         {
@@ -150,7 +157,6 @@ ParadigmDescription(
         },
     ],
 )
-
 
 
 ParadigmDescription(

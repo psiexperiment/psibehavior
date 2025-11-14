@@ -95,7 +95,8 @@ def configure_stim_manager(manifest, event):
     manager_class = getattr(module, class_name)
 
     # Initialize it and attach it to the controller
-    manager_instance = manager_class(controller, **manifest.manager_kwargs)
+    manager_instance = manager_class(controller, prefix=manifest.prefix,
+                                     **manifest.manager_kwargs)
     controller.stim_managers.append(manager_instance)
 
 
