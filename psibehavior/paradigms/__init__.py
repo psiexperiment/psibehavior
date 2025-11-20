@@ -62,7 +62,6 @@ COMMON_PLUGINS = [
             },
             'fft_freq_lb': 1e3,
         },
-        'required': True,
     },
     {
         'manifest': 'psi.paradigms.core.signal_mixins.MultiSignalFFTViewManifest',
@@ -74,7 +73,6 @@ COMMON_PLUGINS = [
             },
             'fft_freq_lb': 1e2,
         },
-        'required': True,
     },
     {
         'manifest': PATH + 'timeout.Light',
