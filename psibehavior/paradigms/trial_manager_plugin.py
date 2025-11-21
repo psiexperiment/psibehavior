@@ -733,10 +733,10 @@ class ModulationTask(NAFCTrialManager):
         {
             'name': 'stm_depth_list',
             'label': 'STM depths (dB)',
-            'default': ['24'],
+            'default': ['-24'],
             'scope': 'arbitrary',
             'type': 'MultiSelectParameter',
-            'choices': {str(d): d for d in [3, 6, 9, 12, 15, 18, 21, 24]},
+            'choices': {str(d): d for d in [-3, -6, -9, -12, -15, -18, -21, -24]},
             'quote_values': False,
             'button_width': 40,
             'n_cols': 4,
