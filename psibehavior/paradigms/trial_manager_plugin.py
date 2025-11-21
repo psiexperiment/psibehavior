@@ -850,9 +850,18 @@ class ModulationTask(NAFCTrialManager):
         frequency = {
             'fc': stim['fc'] * 1e3,
             'octaves': self.get_value('bw'),
-            'rolloff_octaves': 0.25,
+            #'rolloff_octaves': 0.25,
+            #'rolloff': 16,
+        }
+        masker = {
+            'fc': stim['fc'] * 1e3,
+            'octaves': self.get_value('bw') * 2,
+            'type': 'flanking',
+            'gain': 0,
+            'rolloff_octaves': 0.5,
             'rolloff': 16,
         }
+
         waveform = stm(
             frequency=frequency,
             depth=stim['stm_depth'],
@@ -863,6 +872,7 @@ class ModulationTask(NAFCTrialManager):
             mod_type='exp',
             calibration=self.output.calibration,
             level=stim['actual_level'],
+            masker=masker,
         )
         waveform = apply_cos2envelope(
             waveform,
