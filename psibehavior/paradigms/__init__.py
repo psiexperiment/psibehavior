@@ -142,11 +142,12 @@ ParadigmDescription(
          'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.ModulationTask'},
         },
         {'manifest': PATH + 'trial_manager.ContinuousStimManagerManifest',
+         'title': 'Bandlimited FIR noise masker',
          'attrs': {
              'manager_path': 'psibehavior.paradigms.trial_manager_plugin.BandlimitedFIRNoise',
              'manager_kwargs': {'output_names': ['continuous_output_1']},
          },
-         'required': True,
+         'required': False,
         },
         REWARD_1,
         REWARD_2,
