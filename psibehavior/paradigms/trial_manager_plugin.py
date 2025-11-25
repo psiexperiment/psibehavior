@@ -754,6 +754,12 @@ class ModulationTask(NAFCTrialManager):
             'scope': 'arbitrary',
         },
         {
+            'name': 'masker_gain',
+            'label': 'Flanking masker gain (re. stim)',
+            'default': 0,
+            'scope': 'arbitrary',
+        },
+        {
             'name': 'cpo',
             'label': 'Ripple (cycles per octave)',
             'default': 2,
@@ -857,7 +863,7 @@ class ModulationTask(NAFCTrialManager):
             'fc': stim['fc'] * 1e3,
             'octaves': self.get_value('bw') * 2,
             'type': 'flanking',
-            'gain': 0,
+            'gain': self.get_value('masker_gain'),
             'rolloff_octaves': 0.5,
             'rolloff': 16,
         }
