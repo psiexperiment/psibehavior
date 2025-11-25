@@ -502,4 +502,5 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             else:
                 next_event = self.events.digital_np_start
             log.info('Starting next event for %d ms from now', ms)
-            timed_call(ms, self.random_behavior_cb, next_event)
+            if self.experiment_state == 'running':
+                timed_call(ms, self.random_behavior_cb, next_event)
