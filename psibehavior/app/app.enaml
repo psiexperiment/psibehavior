@@ -37,6 +37,9 @@ from psiapp.api import(
 
 DATA_ROOT = Path(get_config('DATA_ROOT'))
 
+DEFAULT_ABTS_ROOT = os.path.expanduser('~/Documents/abts')
+ABTS_ROOT = Path(os.environ.get('ABTS_ROOT', DEFAULT_ABTS_ROOT))
+
 
 class Settings(Atom):
 
@@ -185,8 +188,7 @@ enamldef Main(MainWindow): main:
             Action:
                 text = 'Load config\tCtrl+O'
                 triggered ::
-                    #path = CFTS_ROOT / 'cfts-launcher'
-                    path = Path('test')
+                    path = ABTS_ROOT / 'abts-launcher'
                     path.mkdir(exist_ok=True, parents=True)
                     filename = FileDialogEx.get_open_file_name(
                         current_path=str(path),
@@ -197,8 +199,7 @@ enamldef Main(MainWindow): main:
             Action:
                 text = 'Save config\tCtrl+O'
                 triggered ::
-                    #path = CFTS_ROOT / 'cfts-launcher'
-                    path = Path('test')
+                    path = ABTS_ROOT / 'abts-launcher'
                     path.mkdir(exist_ok=True, parents=True)
                     filename = FileDialogEx.get_save_file_name(
                         current_path=str(path),
