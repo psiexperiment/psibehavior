@@ -57,7 +57,8 @@ enamldef TrialLogManifest(ExperimentManifest): manifest:
                     data << store._data[:]
                     get_cell_color => (row, column):
                         tt = data[row].get('trial_type', None)
-                        return manifest.colors.get(tt, 'white')
+                        ts = data[row].get('trial_subtype', None)
+                        return manifest.colors.get((tt, ts), 'white')
                     autoscroll = True
                     columns_movable = False
                     header_resize_mode = 'contents'

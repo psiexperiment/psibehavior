@@ -7,16 +7,15 @@ CORE_PATH = 'psi.paradigms.core.'
 
 COLORS = {
     # Used for TrialLog
-    'go': 'lightgreen',
-    'go_warmup': 'limegreen',
-    'go_forced': 'limegreen',
-    'go_remind': 'limegreen',
-    'go_manual': 'limegreen',
+    ('go', None): 'lightgreen',
+    ('target', None): 'lightgreen',
+    ('go', 'remind'): 'limegreen',
+    ('target', 'remind'): 'limegreen',
 
-    'nogo': 'lightpink',
-    'nogo_forced': 'pink',
-    'nogo_repeat': 'pink',
-    'nogo_warmup': 'pink',
+    ('nogo', None): 'lightpink',
+    ('reference', None): 'lightpink',
+    ('nogo', 'remind'): 'pink',
+    ('reference', 'remind'): 'pink',
 }
 
 
@@ -156,6 +155,34 @@ ParadigmDescription(
         },
     ],
 )
+
+
+ParadigmDescription(
+    'modulation-gonogo', 'Modulation detection (go/nogo)', 'animal',
+    COMMON_PLUGINS + [
+        {'manifest': PATH + 'behavior_nafc.BehaviorManifest', 'attrs': {'N_response': 1, 'N_output': 1}},
+        {'manifest': PATH + 'trial_manager.TrialManagerManifest',
+         'attrs': {'manager_path': 'psibehavior.paradigms.trial_manager_plugin.ModulationTask'},
+        },
+        {'manifest': PATH + 'trial_manager.ContinuousStimManagerManifest',
+         'title': 'Bandlimited FIR noise masker',
+         'attrs': {
+             'manager_path': 'psibehavior.paradigms.trial_manager_plugin.BandlimitedFIRNoise',
+             'manager_kwargs': {'output_names': ['continuous_output_1']},
+         },
+         'required': False,
+        },
+        REWARD_1,
+        {
+            'manifest': 'psibehavior.paradigms.sdt_analysis.SDTAnalysisManifest',
+            'required': True,
+            'attrs': {
+                'colors': COLORS,
+            },
+        },
+    ],
+)
+
 
 
 ParadigmDescription(

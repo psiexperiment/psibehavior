@@ -49,7 +49,8 @@ def generate_context_items(manifest, workbench):
         context_items.append(item)
 
     for group_name in context_group_names:
-        context_items.append(context_api.ContextGroup(name=group_name))
+        group = context_api.ContextGroup(name=group_name)
+        context_items.append(group)
 
     CONTEXT_ITEM_CACHE[manifest] = context_items
 

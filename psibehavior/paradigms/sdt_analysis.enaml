@@ -62,7 +62,7 @@ class SDTAnalysisPlugin(Plugin):
         data = self.data[-self.limit:]
         data = pd.DataFrame(data)
 
-        all_nogo_data = data.query('trial_type == "nogo"')
+        all_nogo_data = data.query('trial_type == "reference"')
         nogo_data = all_nogo_data.query('trial_subtype != "repeat"')
         self.fa_repeat = 1 - all_nogo_data['correct'].mean()
         self.fa = 1 - nogo_data['correct'].mean()
@@ -73,7 +73,7 @@ class SDTAnalysisPlugin(Plugin):
             data = data.query('trial_subtype != "remind"')
 
         data['yes'] = False
-        go_mask = data['trial_type'] == 'go'
+        go_mask = data['trial_type'] == 'target'
         data.loc[go_mask & data['correct'], 'yes'] = True
         data.loc[~go_mask & ~data['correct'], 'yes'] = True
 
@@ -93,9 +93,8 @@ class SDTAnalysisPlugin(Plugin):
 
         # Attempt to correct for the FA rate. If there is no NOGO, then assume
         # the FA rate is 0.05 (which corresponds to a "correct" rate of 0.95.
-        print(r)
         try:
-            reference = r.loc['nogo', 'z_score'].rename('reference_z_score')
+            reference = r.loc['reference', 'z_score'].rename('reference_z_score')
             reference = reference.reset_index(self.grouping[-1], drop=True)
             if len(self.grouping) == 1:
                 if len(reference) != 1:
@@ -117,7 +116,8 @@ class SDTAnalysisPlugin(Plugin):
                 r = r.reset_index()
 
         # The reset_index here renumbers the index from 0 ... n_rows
-        self.results = r.sort_values(self.grouping).reset_index(drop=True)
+        self.results = r.query('trial_type != "reference"') \
+            .sort_values(self.grouping).reset_index(drop=True)
 
 
 EXTRA_COLUMNS = {
@@ -290,9 +290,9 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                     #data ::
                     #    # TODO: Why???
                     #    sdt_plot.data = plugin.results
-                    get_cell_color => (row, column):
-                        tt = data.at[row, 'trial_type']
-                        return manifest.colors[tt]
+                    #get_cell_color => (row, column):
+                    #    tt = data.at[row, 'trial_type']
+                    #    return manifest.colors[tt]
 
     Extension:
         id = manifest.id + '.preferences'

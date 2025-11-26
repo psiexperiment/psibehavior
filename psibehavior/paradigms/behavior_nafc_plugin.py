@@ -320,64 +320,45 @@ class BehaviorPlugin(BaseBehaviorPlugin):
                 self.invoke_actions(f'deliver_reward_{self.reward_condition[0]}', timestamp)
             return
 
-        if self.N_response == 1:
-            # This is a special-case section for scoring go-nogo, which is
-            # defined when the number of response inputs are 1. A repoke into
-            # the nose port or no response will be scored as a "no" response
-            # (i.e., the subject did not hear the target). A response at the
-            # single response input will be socred as a "yes" response.
-            if event.category == 'np' and event.phase == 'start':
-                self.trial_info['response_ts'] = timestamp
-                self.trial_info['response_side'] = 0
-                response = 'np'
-                score = self.scores.correct if self.response_condition == 0 \
-                    else self.scores.incorrect
-            elif event.category == 'response' and event.phase == 'elapsed':
-                self.trial_info['response_ts'] = np.nan
-                self.trial_info['response_side'] = np.nan
-                response = 'no_response'
-                score = self.scores.correct if self.response_condition == 0 \
-                    else self.scores.incorrect
-            elif event.category == 'response' and event.phase == 'start':
-                self.trial_info['response_ts'] = timestamp
-                self.trial_info['response_side'] = event.side
-                response = f'{self.response_name}_{event.side}'
-                score = self.scores.correct if self.response_condition == 1 \
-                    else self.scores.incorrect
-                if not self.context.get_value('training_mode'):
-                    self.invoke_actions(f'deliver_reward_{event.side}', timestamp)
+        if event.category == 'np' and event.phase == 'start':
+            # This is a special case to handle a nose-poke being the correct
+            # response (e.g., on a nogo trial).
+            self.trial_info['response_ts'] = timestamp
+            self.trial_info['response_side'] = 0
+            if 0 in self.response_condition:
+                score = self.scores.correct
             else:
-                # This event does not need to be handled. Ignore and bypass any
-                # additional logic.
-                return
+                score = self.scores.incorrect
+            response = 'np'
+        elif event.category == 'response' and event.phase == 'start':
+            self.trial_info['response_ts'] = timestamp
+            self.trial_info['response_side'] = event.side
+            if event.side in self.response_condition:
+                score = self.scores.correct
+            else:
+                score = self.scores.incorrect
+            response = f'{self.response_name}_{event.side}'
+            if not self.context.get_value('training_mode') and \
+                    event.side in self.reward_condition:
+                self.invoke_actions(f'deliver_reward_{event.side}', timestamp)
+        elif event.category == 'response' and event.phase == 'elapsed':
             self.invoke_actions('response_end', timestamp)
-            self.end_trial(response, score)
-
-        else:
-            # This is the NAFC section of the scoring.
-            if event.category == 'response' and event.phase == 'start':
-                self.trial_info['response_ts'] = timestamp
-                self.trial_info['response_side'] = event.side
-                if event.side in self.response_condition:
-                    score = self.scores.correct
-                else:
-                    score = self.scores.incorrect
-                response = f'{self.response_name}_{event.side}'
-                if not self.context.get_value('training_mode') and \
-                        event.side in self.reward_condition:
-                    self.invoke_actions(f'deliver_reward_{event.side}', timestamp)
-            elif event.category == 'response' and event.phase == 'elapsed':
-                self.invoke_actions('response_end', timestamp)
-                self.trial_info['response_ts'] = np.nan
-                self.trial_info['response_side'] = np.nan
-                response = 'no_response'
+            self.trial_info['response_ts'] = np.nan
+            self.trial_info['response_side'] = np.nan
+            response = 'no_response'
+            if -1 in self.response_condition:
+                # This means that no response can be scored as correct.
+                # Typically used in go/nogo trials where no response indicates
+                # the subject did not hear the target.
+                score = self.scores.correct
+            else:
                 score = self.scores.invalid
-            else:
-                # This event does not need to be handled. Ignore and bypass any
-                # additional logic.
-                return
-            self.invoke_actions('response_end', timestamp)
-            self.end_trial(response, score)
+        else:
+            # This event does not need to be handled. Ignore and bypass any
+            # additional logic.
+            return
+        self.invoke_actions('response_end', timestamp)
+        self.end_trial(response, score)
 
     def end_trial(self, response, score):
         self.stop_event_timer()
