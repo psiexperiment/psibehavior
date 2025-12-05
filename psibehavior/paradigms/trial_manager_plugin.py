@@ -813,10 +813,10 @@ STM_PARAMETERS = [
         'default': ['-24'],
         'scope': 'arbitrary',
         'type': 'MultiSelectParameter',
-        'choices': {str(d): d for d in [-3, -6, -9, -12, -15, -18, -21, -24]},
+        'choices': {str(d): d for d in range(-3, -61, -3)},
         'quote_values': False,
         'button_width': 40,
-        'n_cols': 4,
+        'n_cols': 6,
     },
     {
         'name': 'max_reward_depth',
