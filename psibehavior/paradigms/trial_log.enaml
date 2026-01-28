@@ -1,3 +1,4 @@
+import datetime as dt
 from functools import partial
 
 from enaml.widgets.api import Container, DockItem
@@ -85,8 +86,12 @@ enamldef TrialLogManifest(ExperimentManifest): manifest:
                 table.columns = [v.name for v in values]
                 column_info = {}
                 for v in values:
+                    if v.name == 'trial_start':
+                        fmt = lambda x: str(dt.timedelta(seconds=int(x)))
+                    else:
+                        fmt = '{:.2f}'.format if 'f' in v.dtype else str
                     column_info[v.name] = {
                         'label': v.compact_label,
-                        'to_string': '{:.2f}'.format if 'f' in v.dtype else str,
+                        'to_string': fmt,
                     }
                 table.column_info = column_info
