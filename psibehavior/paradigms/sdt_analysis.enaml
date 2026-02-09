@@ -167,10 +167,14 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                 for v in meta.values:
                     column_info[v.name] = {
                         'label': v.compact_label,
+                        'plot_label': v.label,
                         'to_string': '{:.2f}'.format if 'f' in v.dtype else str,
                     }
 
                 meta_columns = list(column_info)
+                sdt_plot.grouping = meta_columns[:-2]
+                sdt_plot.x_column = meta_columns[-2]
+                sdt_plot.container.x_label = column_info[meta_columns[-2]]['plot_label']
                 column_info.update(EXTRA_COLUMNS)
 
                 # Order is important here to prevent triggering updates of
@@ -179,8 +183,7 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                 sdt_table.columns = list(column_info)
                 sdt_table.column_info = column_info
                 plugin.grouping = meta_columns
-                #sdt_plot.grouping = meta_columns[:-1]
-                #sdt_plot.x_column = meta_columns[-1]
+
 
     Extension:
         id = manifest.id + 'commands'
@@ -196,28 +199,31 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
             event = 'trial_end'
             command = manifest.id + '.update_analysis'
 
-    #Extension:
-    #    id = manifest.id + '.plots'
-    #    point = 'psi.data.plots'
+    Extension:
+        id = manifest.id + '.plots'
+        point = 'psi.data.plots'
 
-    #    PlotContainer:
-    #        label = manifest.title + ' plot'
-    #        name = manifest.id + '.sdt_plot'
+        PlotContainer:
+            label = manifest.title + ' plot'
+            name = manifest.id + '.sdt_plot'
+            x_label = 'Parameter'
 
-    #        ViewBox:
-    #            DataFramePlot: sdt_plot:
-    #                initialized ::
-    #                    print(self.pen_color_cycle)
-    #                    print(self.data)
-    #                    # There seems to be an initialization issue. Items are
-    #                    # not getting bound properly. Probably need to set up a
-    #                    # plots manifest thing.
+            ViewBox:
+                y_label = "Performance (d')"
+                y_autoscale = True
+                DataFramePlot: sdt_plot:
+                    initialized ::
+                        print(self.pen_color_cycle)
+                        print(self.data)
+                        # There seems to be an initialization issue. Items are
+                        # not getting bound properly. Probably need to set up a
+                        # plots manifest thing.
 
-    #                pen_color_cycle = 'palettable.cartocolors.qualitative.Safe_10'
-    #                y_column = 'z_score'
-    #                # TODO: Why is this not binding? I have to manually update
-    #                # in the sdt_table below.
-    #                data << workbench.get_plugin(manifest.id).results
+                    pen_color_cycle = 'palettable.cartocolors.qualitative.Safe_10'
+                    y_column = 'z_score'
+                    # TODO: Why is this not binding? I have to manually update
+                    # in the sdt_table below.
+                    data << workbench.get_plugin(manifest.id).results
 
     Extension:
         id = manifest.id + '.workspace'
@@ -287,12 +293,9 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                     stretch_last_section = False
                     columns_movable = False
                     data << plugin.results
-                    #data ::
-                    #    # TODO: Why???
-                    #    sdt_plot.data = plugin.results
-                    #get_cell_color => (row, column):
-                    #    tt = data.at[row, 'trial_type']
-                    #    return manifest.colors[tt]
+                    data ::
+                        # TODO: Why???
+                        sdt_plot.data = plugin.results
 
     Extension:
         id = manifest.id + '.preferences'
