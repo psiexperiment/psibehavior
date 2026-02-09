@@ -16,14 +16,15 @@ from psi import get_config
 
 from cftscal.api import (
     generic_microphone_manager,
-    list_speaker_connections,
-    list_generic_microphone_connections,
+    list_connections,
     speaker_manager
 )
 
 from cftscal.plugins.settings import (
+    GenericMicrophoneSettings,
+    InputSettings,
+    OutputSettings,
     SpeakerSettings,
-    GenericMicrophoneSettings
 )
 
 # Register the paradigms so they show up in the manager
@@ -72,13 +73,25 @@ class Settings(Atom):
     process_manager = Typed(ProcessManager, {})
 
     def _default_available_outputs(self):
-        outputs = list_speaker_connections()
-        settings = [SpeakerSettings(output_name=n, output_label=l) for l, n in outputs.items()]
+        settings = []
+        for label, name in list_connections('hw_ao', 'speaker').items():
+            setting = OutputSettings(
+                output_name=name,
+                output_label=label,
+                generator=SpeakerSettings(),
+            )
+            settings.append(setting)
         return sorted(settings, key=lambda x: x.output_label)
 
     def _default_available_inputs(self):
-        inputs = list_generic_microphone_connections()
-        settings = [GenericMicrophoneSettings(input_name=n, input_label=l) for l, n in inputs.items()]
+        settings = []
+        for label, name in list_connections('hw_ai', 'generic_microphone').items():
+            setting = InputSettings(
+                input_name=name,
+                input_label=label,
+                sensor=GenericMicrophoneSettings(),
+            )
+            settings.append(setting)
         return sorted(settings, key=lambda x: x.input_label)
 
     def _default_speaker_config(self):
@@ -94,8 +107,8 @@ class Settings(Atom):
             'logging_level': self.logging_level,
             'standard_notes': self.standard_notes,
         }
-        info['speaker_config'] = [{'output_name': s.output_name, 'name': s.name} for s in self.speaker_config]
-        info['mic_config'] = [{'input_name': s.input_name, 'name': s.name} for s in self.mic_config]
+        info['speaker_config'] = [{'output_name': s.output_name, 'name': s.geneator.name} for s in self.speaker_config]
+        info['mic_config'] = [{'input_name': s.input_name, 'name': s.sensor.name} for s in self.mic_config]
         info['experiments'] = [e.__getstate__() for e in self.experiments]
 
         filename = Path(filename)
@@ -108,6 +121,8 @@ class Settings(Atom):
         else:
             info = {}
 
+        print(info)
+
         # Load connected devices from the file, but only update for connections
         # that exist on the system (e.g., if the IO file has been updated).
         # Make a copy of the existing speaker config and update the copy before
@@ -119,7 +134,8 @@ class Settings(Atom):
             for o in self.available_outputs:
                 if o.output_name == output_config['output_name']:
                     speaker_config[i] = o
-                    o.name = output_config['name']
+                    o.generator.name = output_config['name']
+                    print(o.generator.name)
                     break
         self.speaker_config = speaker_config
 
@@ -129,7 +145,8 @@ class Settings(Atom):
             for i in self.available_inputs:
                 if i.input_name == input_config['input_name']:
                     mic_config[j] = i
-                    i.name = input_config['name']
+                    i.sensor.name = input_config['name']
+                    print(i.sensor.name)
                     break
         self.mic_config = mic_config
 
@@ -259,8 +276,8 @@ enamldef Main(MainWindow): main:
                     to_string = lambda x: x.output_label
 
                 ObjectCombo:
-                    items << output_select.selected.available_speakers
-                    selected := output_select.selected.name
+                    items << output_select.selected.generator.available_speakers
+                    selected := output_select.selected.generator.name
 
             Looper:
                 iterable << range(settings.n_microphones)
@@ -272,8 +289,8 @@ enamldef Main(MainWindow): main:
                     to_string = lambda x: x.input_label
 
                 ObjectCombo:
-                    items << input_select.selected.available_microphones
-                    selected := input_select.selected.name
+                    items << input_select.selected.sensor.available_sensors
+                    selected := input_select.selected.sensor.name
 
         GroupBox:
             title = 'Information'
