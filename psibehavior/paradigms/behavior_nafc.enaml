@@ -45,11 +45,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     '''
     Defines the core settings that any behavior experiment may require. Does
     not include timeout/reward settings as those are provided by plugins.
-
-    The IOManifest is required to have:
-
-    * A timed trigger input called `sync_trigger`. This can either be connected
-      to an analog or digital output.
     '''
     attr microphone_names = []
 
@@ -128,13 +123,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
         ExperimentEvent:
             name = 'trial_ready'
 
-        ExperimentAction:
-            # This fires a trigger that starts connected devices (e.g., NI
-            # cards).
-            event = 'engines_configured'
-            command = 'start_trigger_out.trigger'
-            kwargs = {'duration': 0.1}
-
         Looper:
             # Set up the actions and events for each response that the animal
             # will provide a response at.
@@ -172,7 +160,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
         BinaryStore:
             name = 'soundcard_data'
             # Save the loopbacks and microphone signals
-            continuous_inputs = ['loopback_ttl', 'loopback_1', 'sync_trigger_in'] + manifest.microphone_names
+            continuous_inputs = ['loopback_1'] + manifest.microphone_names
 
         BinaryStore:
             # Make sure we save all the behavior data (IR sensors and
@@ -422,12 +410,14 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             name = 'trial_plot_container'
             label = 'Trial timing'
             span = 5
+            track_sources = ['np_contact_analog']
 
             ViewBox:
                 name = 'IR_sensors'
                 y_label = 'IR sensors (V)'
                 y_min = 0
-                y_max = 5
+                y_max = 1
+                save_limits = False
 
                 Looper: looper:
                     attr colors = ['blue', 'red', 'yellow', 'orange']
@@ -435,7 +425,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
 
                     ChannelPlot:
                         decimate_mode = 'none'
-                        source_name = f'{response_name}_contact_{loop_item+1}'
+                        source_name = f'{response_name}_contact_{loop_item+1}_analog'
                         pen_color = looper.colors[loop_item]
                         label = f'Response {loop_item+1}'
 
@@ -449,18 +439,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     source_name = 'np_contact_digital'
                     y = 2.5
                     color = 'gray'
-                    viewbox_name = 'IR_sensors'
-
-                TimepointPlot:
-                    source_name = 'sync_trigger_edges'
-                    y = 2.5
-                    color = 'red'
-                    viewbox_name = 'IR_sensors'
-
-                TimepointPlot:
-                    source_name = 'loopback_ttl_edges'
-                    y = 2.25
-                    color = 'blue'
                     viewbox_name = 'IR_sensors'
 
             ViewBox:

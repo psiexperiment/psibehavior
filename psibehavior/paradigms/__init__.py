@@ -112,6 +112,16 @@ CUE = {
 }
 
 
+GONOGO_IR_SENSOR = {
+    'manifest': 'cftscal.paradigms.ir_sensor.StrobedIR',
+    'attrs': {
+        'output_names': ['hw_ao::ir_emitter'],
+        'input_names': ['hw_ai::np_contact', 'hw_ai::resp_contact_1'],
+    },
+    'required': True,
+}
+
+
 ParadigmDescription(
     'tinnitus-2AFC', 'Tinnitus (2AFC with silence)', 'animal',
     COMMON_PLUGINS + [
@@ -172,6 +182,7 @@ ParadigmDescription(
          },
          'required': False,
         },
+        GONOGO_IR_SENSOR,
         REWARD_1,
         {
             'manifest': 'psibehavior.paradigms.sdt_analysis.SDTAnalysisManifest',

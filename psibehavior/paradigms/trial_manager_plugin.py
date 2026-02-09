@@ -236,7 +236,6 @@ class Tinnitus2AFCManager(BaseTrialManager):
     def __init__(self, controller, prefix=''):
         super().__init__(controller, prefix)
         self.output = self.controller.get_output('output_1')
-        self.sync_trigger = self.controller.get_output('sync_trigger_out')
 
         # Attributes that need to be configured by `prepare_trial`.
         self.trial_state_str = ''
@@ -409,7 +408,6 @@ class Tinnitus2AFCManager(BaseTrialManager):
         with self.output.engine.lock:
             ts = self.controller.get_ts()
             self.output.start_waveform(ts + delay)
-            self.sync_trigger.trigger(ts + delay, 0.1)
         return ts
 
     def end_trial(self, delay=0):
@@ -538,7 +536,6 @@ class GoNogoTrialManager(BaseTrialManager):
         with self.output.engine.lock:
             ts = self.controller.get_ts()
             self.output.start_waveform(ts + delay)
-            self.sync_trigger.trigger(ts + delay, 0.1)
         return ts
 
     def end_trial(self, delay=0):
@@ -607,7 +604,6 @@ class HyperacusisGoNogoManager(GoNogoTrialManager):
     def __init__(self, controller, prefix=''):
         super().__init__(controller, prefix)
         self.output = self.controller.get_output('output_1')
-        self.sync_trigger = self.controller.get_output('sync_trigger_out')
         # Attributes that need to be configured by `prepare_trial`.
         self.frequencies = None
         self.levels = None
@@ -781,7 +777,6 @@ class NAFCTrialManager(BaseTrialManager):
         with self.output.engine.lock:
             ts = self.controller.get_ts()
             self.output.start_waveform(ts + delay)
-            self.sync_trigger.trigger(ts + delay, 0.1)
         return ts
 
     def end_trial(self, delay=0):
@@ -892,13 +887,12 @@ class ModulationTask(NAFCTrialManager):
     def __init__(self, controller, prefix=''):
         super().__init__(controller, prefix)
         self.output = self.controller.get_output('output_1')
-        self.sync_trigger = self.controller.get_output('sync_trigger_out')
         self.stm_depth_list = []
         self.fc_list = []
 
     def next_stim(self, target_probability, remind=False):
         # Check if any of the roving values have changed and update the
-        # selectors as needed 
+        # selectors as needed
         stm_depth_list = self.get_value('stm_depth_list')
         fc_list = self.get_value('fc_list')
         if self.stm_depth_list != stm_depth_list:
