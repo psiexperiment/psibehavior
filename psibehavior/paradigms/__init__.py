@@ -24,6 +24,7 @@ COMMON_PLUGINS = [
         'manifest': 'psi.data.sinks.event_log.EventLogManifest',
         'required': True,
         'attrs': {
+            'show_widget': False,
             'exclude': ['*contact*digital_acquired*', 'trial_ready'],
         },
     },
