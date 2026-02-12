@@ -323,3 +323,46 @@ class NAFCTrialManager(BaseTrialManager):
         self.prior_response = response
         self.prior_score = score
         self.trial_number += 1
+
+    def get_trial_state_str(self, stim):
+        trial_info = f'Trial {self.trial_number+1}: {stim["trial_type"].capitalize()}'
+        if stim['trial_subtype'] is not None:
+            trial_info = f'{trial_info} ({stim["trial_subtype"]})'
+        stim_info = self.get_stim_str(stim)
+        return f'{trial_info}, {stim_info}'
+
+    def get_conditions(self, stim):
+        if self.controller.N_response == 2:
+            side = 1 if stim['trial_type'] == 'reference' else 2
+            response_condition = [side]
+            reward_condition = [side]
+            timeout_condition = [1, 2]
+            timeout_condition.remove(side)
+        elif self.controller.N_response == 1:
+            if stim['trial_type'] == 'reference':
+                response_condition = [-1, 0]
+                reward_condition = []
+                timeout_condition = [1]
+            else:
+                response_condition = [1]
+                reward_condition = [1]
+                timeout_condition = []
+
+        if not self.deliver_reward(stim):
+            # Override reward condition to not provide a reward if it's near
+            # threshold.
+            reward_condition = []
+        return response_condition, reward_condition, timeout_condition
+
+    def next_stim(self, target_probability, remind=False):
+        raise NotImplementedError
+
+    def deliver_reward(self, stim):
+        raise NotImplementedError
+
+    def get_stim_str(self, stim):
+        raise NotImplementedError
+
+    def stim_waveform(self, stim):
+        raise NotImplementedError
+
