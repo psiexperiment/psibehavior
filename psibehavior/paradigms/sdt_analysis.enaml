@@ -132,7 +132,7 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
 
     id = 'sdt_analysis'
     title = 'SDT Analysis'
-    attr colors = {}
+    alias x_scale: plot_container.axis_scale
 
     factory = SDTAnalysisPlugin
 
@@ -184,7 +184,6 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                 sdt_table.column_info = column_info
                 plugin.grouping = meta_columns
 
-
     Extension:
         id = manifest.id + 'commands'
         point = 'enaml.workbench.core.commands'
@@ -203,7 +202,7 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
         id = manifest.id + '.plots'
         point = 'psi.data.plots'
 
-        PlotContainer:
+        PlotContainer: plot_container:
             label = manifest.title + ' plot'
             name = manifest.id + '.sdt_plot'
             x_label = 'Parameter'
