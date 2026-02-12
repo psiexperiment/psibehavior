@@ -10,7 +10,8 @@ import numpy as np
 
 #from psilbhb.stim.wav_set import WavSet
 from .base_behavior_plugin import (BaseBehaviorPlugin, TrialState)
-from .trial_manager_plugin import (BaseTrialManager, BaseContinuousStimManager)
+from .trial_manager_plugin import BaseTrialManager
+from .stim import BaseContinuousStimManager
 
 
 ################################################################################

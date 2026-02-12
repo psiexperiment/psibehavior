@@ -19,9 +19,6 @@ dependencies = [
 ]
 dynamic = ["version"]
 
-[project.scripts]
-abts = "psibehavior.app.main:abts"
-
 [build-system]
 requires = ["setuptools>=61.2", "wheel", "setuptools_scm[toml]>=3.4.3"]
 build-backend = "setuptools.build_meta"

@@ -54,14 +54,19 @@ enamldef TrialLogManifest(ExperimentManifest): manifest:
             name << manifest.id
             title << manifest.title
 
+            attr cache = {}
+
             Container:
                 ListDictTable: table:
                     get_cell_color => (row, column):
+                        if row in cache:
+                            return cache[row]
                         tt = data[row].get('trial_type', None)
                         ts = data[row].get('trial_subtype', None)
-                        return manifest.colors.get((tt, ts), 'white')
+                        cache[row] =  manifest.colors.get((tt, ts), 'white')
+                        return cache[row]
                     columns_movable = False
-                    header_resize_mode = 'contents'
+                    header_resize_mode = 'interactive'
                     stretch_last_section = False
 
     Extension:
@@ -80,6 +85,7 @@ enamldef TrialLogManifest(ExperimentManifest): manifest:
             editable = True
             link_rove = False
             name << manifest.id
+
             label << '{} columns'.format(manifest.title)
             values ::
                 table.columns = [v.name for v in values]
