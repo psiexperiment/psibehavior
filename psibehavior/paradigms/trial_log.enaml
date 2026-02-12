@@ -12,8 +12,9 @@ from psi.data.sinks.api import TableStore
 from psi.experiment.api import ItemPreferences
 
 
-def update_trial_log(store, event):
+def update_trial_log(store, table, event):
     store.process_table(event.parameters['result'])
+    table.append_row(event.parameters['result'])
 
 
 enamldef TrialLogManifest(ExperimentManifest): manifest:
@@ -27,14 +28,14 @@ enamldef TrialLogManifest(ExperimentManifest): manifest:
         point = 'psi.data.sinks'
 
         TableStore: store:
-            name = manifest.name
+            name = manifest.id
 
     Extension:
-        id = manifest.id + '.behavior_commands'
+        id = manifest.id + '.commands'
         point = 'enaml.workbench.core.commands'
         Command:
             id = manifest.id + '.update_trial_log'
-            handler = partial(update_trial_log, store)
+            handler = partial(update_trial_log, store, table)
 
     Extension:
         id = manifest.id + '.actions'
@@ -55,12 +56,10 @@ enamldef TrialLogManifest(ExperimentManifest): manifest:
 
             Container:
                 ListDictTable: table:
-                    data << store._data[:]
                     get_cell_color => (row, column):
                         tt = data[row].get('trial_type', None)
                         ts = data[row].get('trial_subtype', None)
                         return manifest.colors.get((tt, ts), 'white')
-                    autoscroll = True
                     columns_movable = False
                     header_resize_mode = 'contents'
                     stretch_last_section = False
