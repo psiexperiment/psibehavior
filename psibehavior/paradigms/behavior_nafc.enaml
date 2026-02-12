@@ -14,7 +14,6 @@ from psi.controller.api import (
     ContinuousInput, ContinuousCallbackOutput, ControllerManifest, EpochOutput,
     ExperimentAction, ExperimentEvent, ExperimentState
 )
-from psi.data.sinks.api import EventLog
 from psi.experiment.api import StatusItem
 from psi.data.plots import (TimeContainer, TimepointPlot, ChannelPlot, ViewBox)
 from psi.data.sinks.api import BinaryStore
@@ -167,12 +166,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
             name = 'behavior_data'
             continuous_inputs = ['np_contact_analog'] + \
                 [f'{response_name}_contact_{i+1}_analog' for i in range(N_response)]
-
-        EventLog:
-            # Exclude the IR contact detection events since these are numerous
-            # and messy.
-            show_widget = True
-            exclude = ['*contact*digital_acquired*', 'trial_ready']
 
     Extension:
         id = 'io'

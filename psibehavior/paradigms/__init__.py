@@ -21,6 +21,13 @@ COLORS = {
 
 COMMON_PLUGINS = [
     {
+        'manifest': 'psi.data.sinks.event_log.EventLogManifest',
+        'required': True,
+        'attrs': {
+            'exclude': ['*contact*digital_acquired*', 'trial_ready'],
+        },
+    },
+    {
         'manifest': 'psibehavior.paradigms.trial_log.TrialLogManifest',
         'required': True,
         'attrs': {'colors': COLORS,},
