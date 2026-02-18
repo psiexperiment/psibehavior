@@ -164,8 +164,8 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
         BinaryStore:
             # Make sure we save all the behavior data (IR sensors and
             name = 'behavior_data'
-            continuous_inputs = ['np_contact_analog'] + \
-                [f'{response_name}_contact_{i+1}_analog' for i in range(N_response)]
+            continuous_inputs = ['np_contact_raw'] + \
+                [f'{response_name}_contact_{i+1}_raw' for i in range(N_response)]
 
     Extension:
         id = 'io'
