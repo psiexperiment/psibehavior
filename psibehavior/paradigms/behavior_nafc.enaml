@@ -272,6 +272,12 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 default = 0.0
                 scope = 'arbitrary'
             Parameter:
+                name = 'response_delay'
+                label = 'Response delay (s)'
+                compact_label = 'Resp'
+                default = 0
+                scope = 'arbitrary'
+            Parameter:
                 name = 'response_duration'
                 label = 'Response duration (s)'
                 compact_label = 'Resp'

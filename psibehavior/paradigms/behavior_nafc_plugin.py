@@ -282,13 +282,10 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         # `handle_waiting_for_hold` with the event and timestamp the event
         # occurred at.
 
+        self.advance_state('hold', ts)
+
         # First, check to see if we expect the animal to hold the nose-poke for
         # a certain duration. If not, then go straight to the response phase.
-        hold_duration = self.context.get_value('hold_duration')
-        if hold_duration != 0:
-            self.advance_state('hold', ts)
-        else:
-            self.advance_state('response', ts)
 
     def handle_waiting_for_hold(self, event, timestamp):
         if event.category == 'np' and event.phase == 'end':
@@ -308,7 +305,6 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         # event via button. See the definbition of the NAFCEvent enum.
         log.info(f'Waiting for response. Received {event} at {timestamp}')
 
-        # Record
         if (self.trial_info['np_end'] is np.nan) \
                 and (event.category == 'np') and (event.phase == 'end'):
             self.trial_info['np_end'] = timestamp
@@ -322,6 +318,11 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             return
 
         if event.category == 'np' and event.phase == 'start':
+            delay = self.context.get_value('response_delay')
+            if (timestamp - self.trial_info.get('np_end', 0)) < delay:
+                # Animal repoked within response_delay window. Ignore the event.
+                return
+
             # This is a special case to handle a nose-poke being the correct
             # response (e.g., on a nogo trial).
             self.trial_info['response_ts'] = timestamp
@@ -418,9 +419,14 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         log.info(f'Advancing to {state}')
         self.trial_state = getattr(NAFCTrialState, f'waiting_for_{state}')
         elapsed_event = getattr(self.events, f'{state}_duration_elapsed')
-        self.start_event_timer(f'{state}_duration', elapsed_event)
-        start_event = getattr(self.events, f'{state}_start')
-        self.handle_event(start_event, timestamp)
+        duration = self.context.get_value(f'{state}_duration')
+        if duration == 0:
+            # Fast path to move to next event without having to go through timers
+            getattr(self, f'handle_{self.trial_state.name}')(elapsed_event, timestamp)
+        else:
+            self.start_event_timer(f'{state}_duration', elapsed_event)
+            start_event = getattr(self.events, f'{state}_start')
+            self.handle_event(start_event, timestamp)
 
     def handle_waiting_for_np_end(self, event, timestamp):
         if event.category == 'np' and event.phase == 'end':
