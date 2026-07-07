@@ -1,6 +1,7 @@
 import logging
 log = logging.getLogger(__name__)
 
+import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
@@ -57,9 +58,9 @@ class SDTAnalysisPlugin(Plugin):
         data = self.data[-self.limit:]
         data = pd.DataFrame(data)
 
+        # Repeat trials are predictable, so we do not include them in the
+        # analysis.
         data = data.query('trial_subtype != "repeat"')
-        nogo_data = data.query('trial_type == "reference"')
-        self.fa = 1 - nogo_data['correct'].mean()
         if not self.include_remind:
             data = data.query('trial_subtype != "remind"')
 
@@ -67,6 +68,7 @@ class SDTAnalysisPlugin(Plugin):
         go_mask = data['trial_type'] == 'target'
         data.loc[go_mask & data['correct'], 'yes'] = True
         data.loc[~go_mask & ~data['correct'], 'yes'] = True
+        self.fa = data.query('trial_type == "reference"')['yes'].mean()
 
         rename = {
             'sum': 'n_correct',
@@ -74,47 +76,34 @@ class SDTAnalysisPlugin(Plugin):
             'mean': 'fraction_correct'
         }
         r = data \
-            .groupby(self.grouping)['correct'] \
+            .groupby(self.grouping)['yes'] \
             .agg(list(rename)) \
             .rename(columns=rename)
-        r['z_score'] = data.groupby(self.grouping)['yes'].mean() \
-            .clip(lower=0.05, upper=0.95) \
-            .apply(norm.ppf)
+        r['z_score'] = r['fraction_correct'].clip(lower=0.05, upper=0.95).apply(norm.ppf)
 
         # Attempt to correct for the FA rate. If there is no NOGO, then assume
         # the FA rate is 0.05 (which corresponds to a "correct" rate of 0.95.
+        # This code uses a stimulus-specific FA rate rather than the overall FA rate.
         try:
-            reference = r.loc['reference', 'z_score'].rename('reference_z_score')
-            reference = reference.reset_index(self.grouping[-1], drop=True)
-            if len(self.grouping) == 1:
-                if len(reference) != 1:
-                    raise ValueError('Cannot process reference')
-                r = r.reset_index()
-                r['reference_z_score'] = reference.iat[0]
-            else:
-                r = r.reset_index().join(reference, on=reference.index.names)
-        except KeyError as e:
-            log.debug('Handling exception by assuming FA rate is 5%')
-            r['reference_z_score'] = norm.ppf(0.05)
+            reference = r.xs('reference', level='trial_type')['z_score'].reset_index(-1, drop=True)
+            r['z_score_norm'] = r['z_score'].sub(reference)
         except Exception as e:
-            log.debug('Handling exception by assuming FA rate is 5%')
-            r['reference_z_score'] = norm.ppf(0.05)
-        finally:
-            log.error(r)
-            r['z_score'] = r['z_score'] - r['reference_z_score']
-            if r.index.nlevels != 1:
-                r = r.reset_index()
+            log.exception(e)
+            r['z_score_norm'] = np.nan
+            r = r.reset_index()
 
         # The reset_index here renumbers the index from 0 ... n_rows
-        self.results = r.query('trial_type != "reference"') \
-            .sort_values(self.grouping).reset_index(drop=True)
+        self.results = r.sort_values(self.grouping).reset_index(drop=False)
+
+        log.error('here')
+        log.error(self.results)
 
 
 EXTRA_COLUMNS = {
     'n_trials': {'label': '# trials', 'to_string': lambda x: str(int(x))},
     'n_correct': {'label': '# correct', 'to_string': lambda x: str(int(x))},
     'fraction_correct': {'label': 'Frac.', 'to_string': '{:.2f}'.format},
-    'z_score': {'label': 'd\'', 'to_string': '{:.2f}'.format},
+    'z_score_norm': {'label': 'd\'', 'to_string': '{:.2f}'.format},
 }
 
 
@@ -209,7 +198,7 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                         # plots manifest thing.
 
                     pen_color_cycle = 'palettable.cartocolors.qualitative.Safe_10'
-                    y_column = 'z_score'
+                    y_column = 'z_score_norm'
                     # TODO: Why is this not binding? I have to manually update
                     # in the sdt_table below.
                     data << workbench.get_plugin(manifest.id).results
