@@ -58,12 +58,24 @@ class VideoSink(Sink):
     def get_timing(self):
         return self.client.get_timing()
 
+    def show_text(self, text):
+        return self.client.show_text(text)
 
-def get_timing(client, event):
+    def clear_text(self):
+        return self.client.clear_text()
+
+
+def trial_start(client, event):
     info = client.get_timing()
     context = event.workbench.get_plugin('psi.context')
     context.set_value(f'{client.name}_frames_written', info['frame_number'])
     context.set_value(f'{client.name}_frame_ts', info['timestamp'])
+    controller = event.workbench.get_plugin('psi.controller')
+    client.show_text(controller.trial_state_str)
+
+
+def trial_end(client, event):
+    client.clear_text()
 
 
 enamldef VideoSinkManifest(PSIManifest): manifest:
@@ -81,8 +93,11 @@ enamldef VideoSinkManifest(PSIManifest): manifest:
             id = manifest.contribution.name + '.stop_recording'
             handler = lambda e: manifest.contribution.stop_recording()
         Command:
-            id = manifest.contribution.name + '.get_timing'
-            handler = partial(get_timing, manifest.contribution)
+            id = manifest.contribution.name + '.trial_start'
+            handler = partial(trial_start, manifest.contribution)
+        Command:
+            id = manifest.contribution.name + '.trial_end'
+            handler = partial(trial_end, manifest.contribution)
 
 
 enamldef PSIVideo(ExperimentManifest): manifest:
@@ -118,7 +133,10 @@ enamldef PSIVideo(ExperimentManifest): manifest:
             command = manifest.id + '.stop_recording'
         ExperimentAction:
             event = 'trial_start'
-            command = manifest.id + '.get_timing'
+            command = manifest.id + '.trial_start'
+        ExperimentAction:
+            event = 'trial_end'
+            command = manifest.id + '.trial_end'
 
     Extension:
         id = manifest.id + '.parameters'
