@@ -27,13 +27,11 @@ class SDTAnalysisPlugin(Plugin):
     grouping = d_(ContainerList())
 
     limit = Int()
-    include_repeats = Bool(True)
     include_remind = Bool(True)
 
     data = ContainerList()
     results = Value()
     fa = Float()
-    fa_repeat = Float()
 
     def append_data(self, event):
         self.data.append(event.parameters['result'])
@@ -43,9 +41,6 @@ class SDTAnalysisPlugin(Plugin):
         self.update_results()
 
     def _observe_limit(self, event):
-        self.update_results()
-
-    def _observe_include_repeats(self, event):
         self.update_results()
 
     def _observe_include_remind(self, event):
@@ -62,13 +57,9 @@ class SDTAnalysisPlugin(Plugin):
         data = self.data[-self.limit:]
         data = pd.DataFrame(data)
 
-        all_nogo_data = data.query('trial_type == "reference"')
-        nogo_data = all_nogo_data.query('trial_subtype != "repeat"')
-        self.fa_repeat = 1 - all_nogo_data['correct'].mean()
+        data = data.query('trial_subtype != "repeat"')
+        nogo_data = data.query('trial_type == "reference"')
         self.fa = 1 - nogo_data['correct'].mean()
-
-        if not self.include_repeats:
-            data = data.query('trial_subtype != "repeat"')
         if not self.include_remind:
             data = data.query('trial_subtype != "remind"')
 
@@ -82,10 +73,9 @@ class SDTAnalysisPlugin(Plugin):
             'size': 'n_trials',
             'mean': 'fraction_correct'
         }
-        agg = list(rename)
         r = data \
             .groupby(self.grouping)['correct'] \
-            .agg(agg) \
+            .agg(list(rename)) \
             .rename(columns=rename)
         r['z_score'] = data.groupby(self.grouping)['yes'].mean() \
             .clip(lower=0.05, upper=0.95) \
@@ -261,9 +251,6 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                     HGroup:
                         padding = 0
                         spacing = 5
-                        CheckBox: repeat_nogo_field:
-                            checked := plugin.include_repeats
-                            text = 'repeat NOGO'
                         CheckBox: go_remind_field:
                             checked := plugin.include_remind
                             text = 'reminders'
@@ -281,10 +268,6 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
                         text = 'FA rate'
                     Label: fa_value:
                         text << '{:.2f}'.format(plugin.fa)
-                    Label: fa_repeat_label:
-                        text = 'FA rate (incl. repeat)'
-                    Label: fa_repeat_value:
-                        text << '{:.2f}'.format(plugin.fa_repeat)
 
                 DataFrameTable: sdt_table:
                     name = 'sdt_table'
