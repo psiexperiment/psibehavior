@@ -12,6 +12,9 @@ class BaseTrialManager:
     #: `group_name`, must be provided for each parameter.
     default_group_name = None
 
+    #: EpochWaveform instance used for managing waveform.
+    waveform = None
+
     def __init__(self, controller, prefix=''):
         self.controller = controller
         self.context = controller.context
@@ -162,7 +165,7 @@ class GoNogoTrialManager(BaseTrialManager):
 
         waveform = self.stim_waveform(self.current_stim)
         with self.output.engine.lock:
-            self.output.set_waveform(waveform)
+            self.waveform = self.output.add_waveform(waveform)
 
         if self.trial_type.startswith('nogo'):
             return [0], [0], [1]
@@ -172,7 +175,7 @@ class GoNogoTrialManager(BaseTrialManager):
     def start_trial(self, delay):
         with self.output.engine.lock:
             ts = self.controller.get_ts()
-            self.output.start_waveform(ts + delay)
+            self.waveform.start(ts + delay, allow_belated=True)
         return ts
 
     def end_trial(self, delay=0):
@@ -305,21 +308,22 @@ class NAFCTrialManager(BaseTrialManager):
 
         waveform = self.stim_waveform(self.current_stim)
         with self.output.engine.lock:
-            self.output.set_waveform(waveform)
+            self.waveform = self.output.add_waveform(waveform)
         return self.get_conditions(self.current_stim)
 
     def start_trial(self, delay):
         with self.output.engine.lock:
             ts = self.controller.get_ts()
-            self.output.start_waveform(ts + delay)
+            self.waveform.start(ts + delay, allow_belated=True)
         return ts
 
     def end_trial(self, delay=0):
         with self.output.engine.lock:
-            ts = self.controller.get_ts()
-            self.output.stop_waveform(ts + delay)
+            self.waveform.cancel()
 
     def trial_complete(self, response, score, info):
+        info['stim_start'] = self.waveform.actual_ts
+        info['stim_complete'] = self.waveform.complete
         self.prior_response = response
         self.prior_score = score
         self.trial_number += 1
@@ -365,4 +369,3 @@ class NAFCTrialManager(BaseTrialManager):
 
     def stim_waveform(self, stim):
         raise NotImplementedError
-

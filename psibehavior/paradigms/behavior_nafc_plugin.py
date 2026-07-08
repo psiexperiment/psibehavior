@@ -222,7 +222,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         #: TODO: Allow for capturing additional info here.
         self.response_condition, \
             self.reward_condition, \
-            self.timeout_condition =\
+            self.timeout_condition = \
             self.trial_manager.prepare_trial()
 
         # Now trigger any callbacks that are listening for the trial_ready
@@ -367,6 +367,12 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         ts = self.get_ts()
         log.info(f'Ending trial with {response} scored as {score}')
 
+        if score == self.scores.invalid:
+            # First, check if early withdraw from nose-poke, in which case we
+            # want to end sound (and the trial) as fast as possible.
+            self.trial_manager.end_trial()
+
+        # Now, update with information about the trial.
         response_time = self.trial_info['response_ts']-self.trial_info['trial_start']
         reaction_time = self.trial_info['np_end'] - self.trial_info['trial_start']
         np = self.trial_info['np_end'] - self.trial_info['np_start']
@@ -378,13 +384,9 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             'reaction_time': reaction_time,
             'np_actual_duration': np,
         })
+        self.trial_manager.trial_complete(response, score, self.trial_info)
         self.trial_info.update(self.context.get_values())
         self.invoke_actions('trial_end', ts, kw={'result': self.trial_info.copy()})
-        self.trial_manager.trial_complete(response, score, self.trial_info)
-
-        if score == self.scores.invalid:
-            # Early withdraw from nose-poke want to stop sound
-            self.trial_manager.end_trial()
 
         if self.trial_info['response_side'] in self.timeout_condition:
             if self.context.get_value('to_duration') > 0:

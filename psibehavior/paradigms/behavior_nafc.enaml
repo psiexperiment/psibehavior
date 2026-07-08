@@ -11,8 +11,8 @@ from psi.context.api import (
     BoolParameter, EnumParameter, ContextGroup, ContextRow, Parameter, Result
 )
 from psi.controller.api import (
-    ContinuousInput, ContinuousCallbackOutput, ControllerManifest, EpochOutput,
-    ExperimentAction, ExperimentEvent, ExperimentState
+    ContinuousInput, ContinuousCallbackOutput, ControllerManifest,
+    ExperimentAction, ExperimentEvent, ExperimentState, WaveformOutput
 )
 from psi.experiment.api import StatusItem
 from psi.data.plots import (TimeContainer, TimepointPlot, ChannelPlot, ViewBox)
@@ -181,7 +181,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 target_name = f'hw_ao::speaker_{loop_item+1}'
                 configurable = False
 
-            EpochOutput:
+            WaveformOutput:
                 name = f'output_{loop_item+1}'
                 label = f'Output {loop_item+1}'
                 target_name = f'hw_ao::speaker_{loop_item+1}'
@@ -328,6 +328,14 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 name = 'trial_start'
                 compact_label = 'T/'
                 dtype = 'float64'
+            Result:
+                name = 'stim_start'
+                compact_label = 'S/'
+                dtype = 'float64'
+            Result:
+                name = 'stim_complete'
+                compact_label = 'S*'
+                dtype = 'bool'
             Result:
                 name = 'np_actual_duration'
                 compact_label = 'NP dur. (actual)'

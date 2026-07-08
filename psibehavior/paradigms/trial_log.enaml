@@ -91,7 +91,7 @@ enamldef TrialLogManifest(ExperimentManifest): manifest:
                 table.columns = [v.name for v in values]
                 column_info = {}
                 for v in values:
-                    if v.name == 'trial_start':
+                    if v.name in ('trial_start', 'stim_start'):
                         fmt = lambda x: str(dt.timedelta(seconds=int(x)))
                     else:
                         fmt = '{:.2f}'.format if 'f' in v.dtype else str
