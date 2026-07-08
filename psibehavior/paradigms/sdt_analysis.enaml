@@ -112,6 +112,8 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
     id = 'sdt_analysis'
     title = 'SDT Analysis'
     alias x_scale: plot_container.axis_scale
+    alias x_min: plot_container.x_min
+    alias x_max: plot_container.x_max
 
     factory = SDTAnalysisPlugin
 
@@ -188,7 +190,9 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
 
             ViewBox:
                 y_label = "Performance (d')"
-                y_autoscale = True
+                y_min = -1
+                y_max = 4
+                save_limits = False
                 DataFramePlot: sdt_plot:
                     initialized ::
                         print(self.pen_color_cycle)
