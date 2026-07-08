@@ -51,6 +51,7 @@ class VideoSink(Sink):
 
     def stop_recording(self):
         try:
+            self.clear_text()
             self.client.stop()
         except Exception as e:
             log.exception(e)
