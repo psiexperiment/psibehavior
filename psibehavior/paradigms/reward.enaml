@@ -120,7 +120,7 @@ enamldef PelletDispenser(BaseRewardDispenser): manifest:
     '''
     id = f'{output_name}_dispenser'
     output_name = 'pellet_dispense'
-    attr duration = 0.1
+    attr duration = 0.25
 
     Extension:
         id = manifest.id + '.actions'
