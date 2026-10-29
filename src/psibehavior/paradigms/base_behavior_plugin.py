@@ -49,43 +49,126 @@ class BaseBehaviorPlugin(ControllerPlugin):
     #: Lock object to ensure concurrency.
     lock = Value()
 
+    #: Apply and pause requests that could not take effect immediately. These
+    #: are owned by the control dispatcher. The GUI binds to the
+    #: `_apply_requested` and `_pause_requested` flags on `ControllerPlugin`,
+    #: which mirror these via `deferred_call`.
+    _apply_latched = Bool(False)
+    _pause_latched = Bool(False)
+
     def _default_lock(self):
         return RLock()
 
     def can_modify(self):
         return True
 
-    def pause_experiment(self):
-        if self.can_modify():
-            self.experiment_state = 'paused'
-            self._pause_requested = False
-            self.invoke_actions('experiment_paused', self.get_ts())
-            return True
-        return False
+    ############################################################################
+    # Operator requests
+    #
+    # Toolbar buttons (Apply, Pause, Request Remind, Start Trial, simulated
+    # events) are clicked on the GUI thread. Timer and hardware events are
+    # handled on the control dispatcher thread. To avoid races (and deadlocks
+    # from holding `lock` while waiting on the dispatcher), every request is
+    # handed to the dispatcher and the GUI never waits for it.
+    ############################################################################
+    def _submit(self, fn, *args, **kw):
+        '''
+        Run `fn` on the control dispatcher thread without waiting.
+        '''
+        def run():
+            with self.lock:
+                fn(*args, **kw)
+        self._dispatcher.submit(run)
 
-    def resume_experiment(self):
-        if self.can_modify():
-            self.experiment_state = 'running'
-            self._resume_requested = False
-            self.invoke_actions('experiment_resumed', self.get_ts())
-            self.prepare_trial()
-            return True
-        return False
+    def submit_event(self, event):
+        '''
+        Handle `event` (e.g., simulated from the toolbar) on the dispatcher.
+        '''
+        self._submit(self.handle_event, event)
 
-    def apply_changes(self):
-        if self.can_modify():
-            log.info('Applying changes')
-            self.context.apply_changes()
-            self.context.next_setting()
-            self.prepare_trial()
-            self._apply_requested = False
-            return True
-        return False
+    def request_apply(self):
+        self._submit(self._request_apply)
+
+    def request_pause(self):
+        self._submit(self._request_pause)
+
+    def request_resume(self):
+        self._submit(self._request_resume)
 
     def request_remind(self):
+        self._submit(self._request_remind)
+
+    def _request_apply(self):
+        if not self.apply_changes():
+            log.info('Apply requested')
+            self._set_apply_latch(True)
+
+    def _request_pause(self):
+        if not self.pause_experiment():
+            log.info('Pause requested')
+            self._set_pause_latch(True)
+
+    def _request_resume(self):
+        self.resume_experiment()
+
+    def _request_remind(self):
         self._remind_requested = True
         if self.can_modify():
             self.prepare_trial(auto_start=True)
+
+    def _set_apply_latch(self, value):
+        self._apply_latched = value
+        deferred_call(setattr, self, '_apply_requested', value)
+
+    def _set_pause_latch(self, value):
+        self._pause_latched = value
+        deferred_call(setattr, self, '_pause_requested', value)
+
+    ############################################################################
+    # ControllerPlugin template methods (run on the dispatcher)
+    ############################################################################
+    def pause_experiment(self):
+        if self.can_modify():
+            self._pause_now()
+            return True
+        return False
+
+    def _pause_now(self):
+        self.experiment_state = 'paused'
+        self._set_pause_latch(False)
+        self.invoke_actions('experiment_paused', self.get_ts())
+
+    def resume_experiment(self):
+        if self.experiment_state != 'paused':
+            # The pause has not taken effect yet. Cancel it.
+            if self._pause_latched:
+                log.info('Pending pause cancelled')
+                self._set_pause_latch(False)
+            return True
+        self.experiment_state = 'running'
+        self.invoke_actions('experiment_resumed', self.get_ts())
+        self.prepare_trial()
+        return True
+
+    def apply_changes(self):
+        if self.can_modify():
+            self._apply_context()
+            self.prepare_trial()
+            return True
+        return False
+
+    def _apply_context(self):
+        '''
+        Apply pending changes to the context and clear the apply request.
+
+        This clears any values set in the context (e.g., the stimulus of the
+        current trial), so it must not be called between preparing a trial and
+        logging its result.
+        '''
+        log.info('Applying changes')
+        self.context.apply_changes()
+        self.context.next_setting()
+        self._set_apply_latch(False)
 
     def et_callback(self, name, edge, event_time):
         event = self.event_map[edge, name]

@@ -19,7 +19,10 @@ def configure_trial_manager(manifest, event):
     module_path, class_name = manifest.manager_path.rsplit('.', 1)
     module = importlib.import_module(module_path)
     manager_class = getattr(module, class_name)
-    controller.trial_manager = manager_class(controller)
+    # Only pass manager_kwargs when set so that managers whose constructor
+    # does not accept extra keyword arguments keep working.
+    controller.trial_manager = manager_class(controller, prefix=manifest.prefix,
+                                             **manifest.manager_kwargs)
 
 
 def generate_context_items(manifest, workbench):
@@ -35,7 +38,16 @@ def generate_context_items(manifest, workbench):
     context_items = []
     prefix = manifest.prefix
 
-    for entry in manager_class.default_parameters:
+    # Trial managers can tailor their parameters to the paradigm definition
+    # via `get_default_parameters`. Continuous stim managers do not define it
+    # (and their manager_kwargs are constructor arguments).
+    get_default_parameters = getattr(manager_class, 'get_default_parameters', None)
+    if get_default_parameters is not None:
+        default_parameters = get_default_parameters(**manifest.manager_kwargs)
+    else:
+        default_parameters = manager_class.default_parameters
+
+    for entry in default_parameters:
         entry = entry.copy()
         entry.setdefault('group_name', manager_class.default_group_name)
         context_group_names.add(prefix + entry['group_name'])
@@ -48,8 +60,11 @@ def generate_context_items(manifest, workbench):
         item.initialize()
         context_items.append(item)
 
+    group_labels = getattr(manifest, 'group_labels', {})
     for group_name in context_group_names:
         group = context_api.ContextGroup(name=group_name)
+        if group_name in group_labels:
+            group.label = group_labels[group_name]
         context_items.append(group)
 
     CONTEXT_ITEM_CACHE[manifest] = context_items
@@ -61,6 +76,14 @@ enamldef TrialManagerManifest(ExperimentManifest): manifest:
 
     id = manifest.manager_path
     attr manager_path
+
+    #: Keyword arguments passed to the manager constructor and to
+    #: `get_default_parameters`.
+    attr manager_kwargs = {}
+
+    #: Labels for the parameter groups (keyed by group name, including the
+    #: prefix).
+    attr group_labels = {}
 
     required = True
 

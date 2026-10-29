@@ -232,7 +232,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     name = 'repeat_incorrect'
                     label = 'Repeat incorrect/invalid trials?'
                     compact_label = 'repeat_incorrect'
-                    default = 'Yes'
+                    default = 'No'
                     choices = {
                         'No': 0,
                         'Early withdraw only': 1,
@@ -246,13 +246,21 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     name = 'repeat_incorrect'
                     label = 'Repeat incorrect/invalid trials?'
                     compact_label = 'repeat_incorrect'
-                    default = 'Yes'
+                    default = 'No'
                     choices = {
                         'No': 0,
                         'Early withdraw only': 1,
                         'All trials': 2,
                     }
                     scope = 'arbitrary'
+                BoolParameter:
+                    # Previously, correct responses on reference trials were
+                    # rewarded only if the trial manager's `deliver_reward`
+                    # returned True for the reference stimulus.
+                    name = 'reward_correct_reference'
+                    label = 'Reward correct reference responses?'
+                    scope = 'arbitrary'
+                    default = False
 
             Parameter:
                 name = 'np_duration'
@@ -320,6 +328,11 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 compact_label = 'C'
                 dtype = 'bool'
             Result:
+                name = 'reward_delivered'
+                label = 'Reward delivered'
+                compact_label = 'Rwd'
+                dtype = 'bool'
+            Result:
                 name = 'response_ts'
                 label = 'Response timestamp'
                 compact_label = 'R|'
@@ -371,9 +384,9 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 checkable = True
                 toggled ::
                     if checked:
-                        controller.handle_event(controller.events.digital_np_start)
+                        controller.submit_event(controller.events.digital_np_start)
                     else:
-                        controller.handle_event(controller.events.digital_np_end)
+                        controller.submit_event(controller.events.digital_np_end)
                 enabled << controller.experiment_state not in ('initialized', 'stopped')
             Looper:
                 iterable = range(N_response)
@@ -385,7 +398,7 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                             event = getattr(controller.events, f'digital_{response_name}_{loop_item+1}_start')
                         else:
                             event = getattr(controller.events, f'digital_{response_name}_{loop_item+1}_end')
-                        controller.handle_event(event)
+                        controller.submit_event(event)
                     enabled << controller.experiment_state not in ('initialized', 'stopped')
             Action:
                 separator = True
