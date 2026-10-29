@@ -1,7 +1,7 @@
 [project]
 name = "psibehavior"
 description = "Module for running behavior experiments using psiexperiment framework"
-requires-python = ">=3.7"
+requires-python = ">=3.11"
 license = {file = "LICENSE.txt"}
 authors = [
     {name = "Brad Buran", email="buran@ohsu.edu"},
