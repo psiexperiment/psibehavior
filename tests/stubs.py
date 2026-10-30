@@ -21,7 +21,7 @@ DEFAULT_PARAMETERS = {
     'min_reward_level': 30,
     # Behavior plugin
     'repeat_incorrect': 0,
-    'reward_correct_reference': False,
+    'reward_correct_reference': True,
     'training_mode': False,
     'manual_control': False,
     'continuous_np': False,
@@ -44,6 +44,16 @@ class Invalid:
         self.message = message
 
 
+class Expression:
+    '''
+    A parameter value that passes validation but is evaluated as Python each
+    time it is read (e.g., `Expression('1/0')`), as psiexperiment does.
+    '''
+
+    def __init__(self, expression):
+        self.expression = expression
+
+
 class ContextNamespace:
     '''
     Mimics the parts of the psiexperiment context plugin used by trial
@@ -64,11 +74,28 @@ class ContextNamespace:
         if name in self.locals:
             return self.locals[name]
         if name in self.parameters:
-            return self.parameters[name]
+            value = self.parameters[name]
+            if isinstance(value, Expression):
+                value = eval(value.expression, {},
+                             {**self.parameters, **self.locals})
+            return value
         raise ValueError(f'Name {name} not defined')
 
     def get_values(self):
-        return {**self.parameters, **self.locals}
+        return {**{n: self.get_value(n) for n in self.parameters},
+                **self.locals}
+
+    @property
+    def expressions(self):
+        # The expressions that would be applied, as psiexperiment provides
+        # them (one string per parameter).
+        expressions = {}
+        for name, value in {**self.parameters, **self.pending}.items():
+            if isinstance(value, Expression):
+                expressions[name] = value.expression
+            elif not isinstance(value, Invalid):
+                expressions[name] = repr(value)
+        return expressions
 
     def set_value(self, name, value):
         self.locals[name] = value
@@ -150,13 +177,9 @@ class StubController:
         self.trial_state_str = ''
         self.output = FakeOutput()
         self.ts = 0.0
-        self.warnings = []
 
     def get_ts(self):
         return self.ts
-
-    def report_warning(self, title, message):
-        self.warnings.append(title)
 
     def get_output(self, name):
         return self.output

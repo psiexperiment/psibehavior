@@ -19,8 +19,8 @@ def configure_trial_manager(manifest, event):
     module_path, class_name = manifest.manager_path.rsplit('.', 1)
     module = importlib.import_module(module_path)
     manager_class = getattr(module, class_name)
-    # Only pass manager_kwargs when set so that managers whose constructor
-    # does not accept extra keyword arguments keep working.
+    # manager_kwargs is empty unless the paradigm sets it, so managers whose
+    # constructor accepts only `prefix` keep working.
     controller.trial_manager = manager_class(controller, prefix=manifest.prefix,
                                              **manifest.manager_kwargs)
     # Needed to know which parameters `get_default_parameters` added.

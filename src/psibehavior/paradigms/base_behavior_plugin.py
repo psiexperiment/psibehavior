@@ -13,6 +13,7 @@ from enaml.workbench.api import Extension
 from enaml.workbench.core.api import Command
 
 
+from psi.context.expression import ExpressionNamespace
 from psi.controller.api import (ControllerManifest, ControllerPlugin,
                                 ExperimentEvent,
                                 ExperimentState)
@@ -56,6 +57,13 @@ class BaseBehaviorPlugin(ControllerPlugin):
     #: which mirror these via `deferred_call`.
     _apply_latched = Bool(False)
     _pause_latched = Bool(False)
+
+    #: Names of the parameters the state machine reads as it moves between
+    #: states (e.g., durations). These are evaluated before changes are
+    #: applied: an expression that is valid but cannot be evaluated (e.g.,
+    #: `1/0`) would otherwise fail partway through a state transition and
+    #: leave the state machine stuck.
+    state_parameters = ()
 
     def _default_lock(self):
         return RLock()
@@ -125,14 +133,6 @@ class BaseBehaviorPlugin(ControllerPlugin):
         log.error('%s: %s', title, message)
         deferred_call(self._show_message, 'critical', title, message)
 
-    def report_warning(self, title, message):
-        '''
-        Like `report_error`, for something the operator should know about
-        but that does not stop the experiment.
-        '''
-        log.warning('%s: %s', title, message)
-        deferred_call(self._show_message, 'warning', title, message)
-
     def _show_message(self, kind, title, message):
         # Runs on the GUI thread. `kind` names a function in
         # enaml.stdlib.message_box (e.g., 'critical' or 'warning').
@@ -140,11 +140,37 @@ class BaseBehaviorPlugin(ControllerPlugin):
             from enaml.stdlib import message_box
         getattr(message_box, kind)(None, title, message)
 
+    def check_changes(self):
+        '''
+        Raise ValueError if the changes that have not been applied yet
+        cannot be applied.
+
+        Besides the checks made by the context (syntax and unknown names),
+        this evaluates the pending expressions for `state_parameters`.
+        '''
+        self.context.validate_expressions()
+        expressions = self.context.expressions
+        namespace = ExpressionNamespace(expressions, dict(self.context.symbols))
+        for name in self.state_parameters:
+            if name not in expressions:
+                # Roved, so the value is only known once a trial is prepared.
+                continue
+            try:
+                namespace.get_value(name)
+            except NameError:
+                # The names were checked above, so this depends on a value
+                # that is only known once a trial is prepared.
+                continue
+            except Exception as e:
+                raise ValueError(
+                    f'"{name}": expression {str(expressions[name])!r} cannot '
+                    f'be evaluated ({type(e).__name__}: {e}).') from e
+
     def _request_apply(self):
         # Check the changes now so that a typo is reported when Apply is
         # clicked rather than when the latched request is acted on.
         try:
-            self.context.validate_expressions()
+            self.check_changes()
         except Exception as e:
             self.report_error('Cannot apply changes', str(e))
             return
@@ -228,6 +254,9 @@ class BaseBehaviorPlugin(ControllerPlugin):
         log.info('Applying changes')
         self._set_apply_latch(False)
         try:
+            # The changes may have been edited since Apply was clicked, so
+            # check them again before they replace the current settings.
+            self.check_changes()
             self.context.apply_changes()
         except Exception as e:
             log.exception('Unable to apply changes')

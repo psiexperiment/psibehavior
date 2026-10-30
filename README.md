@@ -35,11 +35,14 @@ that were not scored as correct. Repeats are not used during remind and warmup
 trials, when a remind trial has been requested, or when a target is forced
 because the maximum number of consecutive reference trials was reached.
 
-* **Reward correct reference responses?** (N-AFC only) - If checked, a correct
-response on a reference trial is rewarded. If not checked, it is scored as
-correct but not rewarded (unless the trial manager's `deliver_reward` returns
-True for the reference stimulus, which was the only way to reward reference
-trials in earlier versions).
+* **Reward correct reference responses?** (N-AFC only) - If checked (the
+default), a correct response on a reference trial is rewarded. If not checked,
+it is scored as correct but not rewarded. The trial manager's `deliver_reward`
+(e.g., withholding rewards for targets near threshold) applies to targets only.
+In earlier versions, references were rewarded only if `deliver_reward` returned
+True for the reference stimulus. Paradigms whose trial manager decides rewards
+itself (by overriding `get_conditions`) leave this setting out by setting
+`reward_reference_option` to False on `BehaviorManifest`.
 
 * **Nose-poke start duration** - Duration of nose poke required to start the
 trial, in seconds. If the animal withdraws before the duration is met, no trial
@@ -83,7 +86,8 @@ settings the trial ran with). Otherwise, they are applied immediately. If the
 next trial has already been prepared, it is prepared again only if the changes
 affect the trial sequence or stimulus. Applying changes never shortens a
 timeout or the intertrial interval. Invalid changes (e.g., an expression with
-a typo) are reported when Apply is clicked and are not applied. If changes
+a typo, or a duration such as `1/0` that cannot be evaluated) are reported
+when Apply is clicked and are not applied. If changes
 made after clicking Apply turn out to be invalid when the trial ends, they are
 reported and not applied, and the experiment carries on with the settings
 already in effect.
@@ -95,13 +99,16 @@ Pause then Resume) to try again.
 
 * **Pause** - Takes effect immediately between trials (while waiting for the
 animal to nose-poke). Otherwise, the experiment pauses at the end of the
-intertrial interval following the current trial (after any timeout). Unchecking
-Pause before then cancels the request. While paused, a trial never starts even
+intertrial interval following the current trial (after any timeout), or
+earlier if Start Trial or Request Remind ends the interval early (a requested
+remind trial is then the first trial after resuming). Unchecking Pause before
+then cancels the request. While paused, a trial never starts even
 if the animal is nose-poking.
 
 * **Request Remind** - While waiting for a nose-poke or during the intertrial
 interval, a remind trial starts immediately. Otherwise, the next trial will be
-a remind trial.
+a remind trial. Paradigms without remind trials hide this button by setting
+`remind_button` to False on `BehaviorManifest`.
 
 * **Start Trial** - While waiting for a nose-poke, starts the trial that has
 been prepared. During the intertrial interval, skips the rest of the interval

@@ -169,14 +169,6 @@ class NAFCTrialManager(BaseTrialManager):
         #: Trial that has been started but not completed.
         self._played = None
 
-        #: True once we have warned that a subclass rewards reference trials
-        #: via `deliver_reward`.
-        self._warned_reference_reward = False
-
-        #: True if the trial being activated is a reference trial rewarded
-        #: via `deliver_reward` (see `reward_reference`).
-        self._legacy_reference_reward = False
-
     ############################################################################
     # Trial lifecycle
     ############################################################################
@@ -374,14 +366,8 @@ class NAFCTrialManager(BaseTrialManager):
         # clears values set in the context, so a reused trial must be written
         # again.
         self.context.set_values(trial.stim)
-        self._legacy_reference_reward = False
         conditions = self.get_conditions(trial.stim)
-        trial_state_str = self.get_trial_state_str(trial.stim)
-        if self._legacy_reference_reward:
-            # The GUI setting says references are not rewarded. Make it
-            # obvious that this one will be.
-            trial_state_str = f'{trial_state_str} (rewarded via deliver_reward)'
-        self.controller.trial_state_str = trial_state_str
+        self.controller.trial_state_str = self.get_trial_state_str(trial.stim)
         return conditions
 
     ############################################################################
@@ -429,27 +415,7 @@ class NAFCTrialManager(BaseTrialManager):
         '''
         if self.controller.N_response == 1:
             return False
-        if self.context.get_value('reward_correct_reference'):
-            return True
-        # Before `reward_correct_reference` existed, `deliver_reward` was also
-        # applied to reference trials. Honor subclasses that still reward
-        # reference trials that way (e.g., ModulationTask with
-        # `max_reward_depth` >= 0) so existing settings behave as before.
-        if self.deliver_reward(stim):
-            self._legacy_reference_reward = True
-            if not self._warned_reference_reward:
-                self._warned_reference_reward = True
-                self.controller.report_warning(
-                    'Reference trials will be rewarded',
-                    'Correct responses on reference trials will be rewarded '
-                    'even though "Reward correct reference responses?" is '
-                    f'unchecked, because {type(self).__name__}.deliver_reward '
-                    'rewards the reference stimulus (e.g., ModulationTask '
-                    'with "Max. reward STM depth" of 0 or more). Check "Reward '
-                    'correct reference responses?" to make this explicit, or '
-                    'change the setting that causes it.')
-            return True
-        return False
+        return self.context.get_value('reward_correct_reference')
 
     ############################################################################
     # Methods subclasses must implement

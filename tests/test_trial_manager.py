@@ -13,6 +13,9 @@ SEQUENCE_KEYS = ('trial_type', 'trial_subtype', 'level', 'conditions',
 def run_session(manager_class, n_trials=200, N_response=1, seed=0,
                 extra_prepares=None, between_prepares=None, remind=False,
                 **parameters):
+    # The pre-M0 implementation rewarded references only via deliver_reward,
+    # which ToyManager never does for them. Match it unless told otherwise.
+    parameters.setdefault('reward_correct_reference', False)
     controller = StubController(N_response=N_response, **parameters)
     manager = manager_class(controller, seed=seed)
     subject = Subject(N_response=N_response, seed=seed + 1)
@@ -324,37 +327,21 @@ def test_reward_conditions(N_response):
 
     assert manager.get_conditions(target_easy)[1] == [port]
     assert manager.get_conditions(target_hard)[1] == []
-    assert manager.get_conditions(reference)[1] == []
 
-    if N_response == 2:
-        controller.context.parameters['reward_correct_reference'] = True
+    if N_response == 1:
+        # Withholding a response is correct, but there is nothing to reward.
+        assert manager.get_conditions(reference)[1] == []
+    else:
+        # Rewarded by default.
         assert manager.get_conditions(reference)[1] == [1]
-        # Near-threshold targets are still governed by deliver_reward.
-        assert manager.get_conditions(target_hard)[1] == []
 
-        # Legacy behavior: deliver_reward returning True for a reference
-        # (e.g., ModulationTask with max_reward_depth >= 0) still rewards it.
+        # Unchecking the setting stops it, even when deliver_reward would
+        # reward the reference stimulus (deliver_reward applies to targets
+        # only).
         controller.context.parameters['reward_correct_reference'] = False
         controller.context.parameters['min_reward_level'] = 0
-        assert controller.warnings == []
-        assert manager.get_conditions(reference)[1] == [1]
-        assert manager.get_conditions(reference)[1] == [1]
-        # The operator is told once.
-        assert controller.warnings == ['Reference trials will be rewarded']
-
-
-def test_legacy_reference_reward_shown_in_status():
-    controller = StubController(N_response=2, remind_trials=0,
-                                warmup_trials=0, target_probability=0,
-                                min_reward_level=0)
-    manager = ToyManager(controller)
-    manager.prepare_trial()
-    assert controller.trial_state_str.endswith('(rewarded via deliver_reward)')
-
-    controller.context.parameters['reward_correct_reference'] = True
-    controller.context.parameters['min_reward_level'] = 30
-    manager.prepare_trial()
-    assert 'deliver_reward' not in controller.trial_state_str
+        assert manager.get_conditions(reference)[1] == []
+        assert manager.get_conditions(target_hard)[1] == [2]
 
 
 def test_prefix_passed_to_get_value():

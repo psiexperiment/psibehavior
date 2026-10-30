@@ -151,6 +151,19 @@ class BehaviorPlugin(BaseBehaviorPlugin):
 
     scores = NAFCTrialScore
 
+    state_parameters = (
+        'training_mode',
+        'manual_control',
+        'continuous_np',
+        'np_duration',
+        'target_delay',
+        'hold_duration',
+        'response_delay',
+        'response_duration',
+        'iti_duration',
+        'to_duration',
+    )
+
     def _default_events(self):
         members = {
             'hold_start': ('hold', 'start', -1, False),
@@ -213,7 +226,10 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         elif self.trial_state == NAFCTrialState.waiting_for_iti:
             # Skip the rest of the intertrial interval.
             self.stop_event_timer()
-            self.prepare_trial(auto_start=True)
+            if self._end_iti():
+                self.prepare_trial(auto_start=True)
+            else:
+                log.info('Not starting a trial since the experiment paused')
         elif self.trial_state == NAFCTrialState.waiting_for_trial_start:
             # The last attempt to prepare a trial failed. Try again.
             self.prepare_trial(auto_start=True)
@@ -229,7 +245,10 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.prepare_trial(auto_start=True)
         elif self.trial_state == NAFCTrialState.waiting_for_iti:
             self.stop_event_timer()
-            self.prepare_trial(auto_start=True)
+            # If the experiment pauses, the remind trial is the first trial
+            # after it resumes.
+            if self._end_iti():
+                self.prepare_trial(auto_start=True)
         # Otherwise, the request is used when the next trial is prepared.
 
     def apply_changes(self):
@@ -568,16 +587,26 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.trial_state = NAFCTrialState.waiting_for_reward_end
         elif event == self.events.iti_duration_elapsed:
             self.invoke_actions(self.events.iti_end.name, timestamp)
-            # Normally consumed in end_trial. This is a backstop.
-            if self._apply_latched:
-                self._apply_context()
-            if self._pause_latched:
-                self._pause_now()
-                self.trial_state = NAFCTrialState.waiting_for_resume
-            elif self.experiment_state != 'running':
-                pass
-            else:
+            if self._end_iti() and self.experiment_state == 'running':
                 self.prepare_trial()
+
+    def _end_iti(self):
+        '''
+        Act on the requests waiting for the end of the intertrial interval
+        (at its scheduled end, or when Start Trial or Request Remind ends it
+        early).
+
+        Returns False if the experiment paused, in which case the next trial
+        must not be prepared.
+        '''
+        # Normally consumed in end_trial. This is a backstop.
+        if self._apply_latched:
+            self._apply_context()
+        if self._pause_latched:
+            self._pause_now()
+            self.trial_state = NAFCTrialState.waiting_for_resume
+            return False
+        return True
 
     def start_random_behavior(self):
         self._submit_request(self._start_random_behavior)

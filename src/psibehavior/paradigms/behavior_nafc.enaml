@@ -63,6 +63,15 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     #: each output. The assumption is that all outputs have loopbacks.
     attr output_loopback = True
 
+    #: Show Request Remind in the toolbar? Set to False for paradigms whose
+    #: trial manager has no remind trials.
+    attr remind_button = True
+
+    #: Include "Reward correct reference responses?" (N-AFC only)? Set to
+    #: False for paradigms whose trial manager decides which responses are
+    #: rewarded without it (i.e., overrides `get_conditions`).
+    attr reward_reference_option = True
+
     factory = lambda: BehaviorPlugin(N_response=N_response,
                                      response_name=response_name)
 
@@ -253,14 +262,18 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                         'All trials': 2,
                     }
                     scope = 'arbitrary'
-                BoolParameter:
-                    # Previously, correct responses on reference trials were
-                    # rewarded only if the trial manager's `deliver_reward`
-                    # returned True for the reference stimulus.
-                    name = 'reward_correct_reference'
-                    label = 'Reward correct reference responses?'
-                    scope = 'arbitrary'
-                    default = False
+                Conditional:
+                    condition = manifest.reward_reference_option
+                    BoolParameter:
+                        # Previously, correct responses on reference trials
+                        # were rewarded only if the trial manager's
+                        # `deliver_reward` returned True for the reference
+                        # stimulus. Now `deliver_reward` applies to targets
+                        # only.
+                        name = 'reward_correct_reference'
+                        label = 'Reward correct reference responses?'
+                        scope = 'arbitrary'
+                        default = True
 
             Parameter:
                 name = 'np_duration'
@@ -367,11 +380,13 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
         point = 'psi.experiment.toolbar'
 
         ToolBar:
-            Action:
-                text = 'Request Remind'
-                triggered ::
-                    controller.request_remind()
-                enabled << controller.experiment_state  == 'running'
+            Conditional:
+                condition = manifest.remind_button
+                Action:
+                    text = 'Request Remind'
+                    triggered ::
+                        controller.request_remind()
+                    enabled << controller.experiment_state  == 'running'
             Action:
                 text = 'Start Trial'
                 triggered ::

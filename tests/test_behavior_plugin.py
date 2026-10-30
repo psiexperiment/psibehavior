@@ -10,7 +10,7 @@ import pytest
 
 from psibehavior.paradigms.behavior_nafc_plugin import (BehaviorPlugin,
                                                         NAFCTrialState as S)
-from stubs import ContextNamespace, FakeOutput, Invalid, ToyManager
+from stubs import ContextNamespace, Expression, FakeOutput, Invalid, ToyManager
 
 
 class StubContextPlugin(Plugin):
@@ -28,6 +28,14 @@ class StubContextPlugin(Plugin):
 
     def set_values(self, values):
         self.ns.set_values(values)
+
+    @property
+    def expressions(self):
+        return self.ns.expressions
+
+    @property
+    def symbols(self):
+        return {}
 
     def validate_expressions(self):
         self.ns.validate_expressions()
@@ -565,6 +573,81 @@ def test_latched_apply_that_fails_at_withdrawal():
     assert not first.cancelled
     plugin.start_by_poking()
     assert first.started
+
+
+def test_apply_that_cannot_be_evaluated_rejected_when_requested():
+    plugin = make_plugin(target_probability=1)
+    change(plugin, iti_duration=Expression('1/0'))
+    plugin.request_apply()
+    assert plugin.h_messages == [('critical', 'Cannot apply changes')]
+    assert plugin.context.ns.applied == 0
+    assert plugin.context.get_value('iti_duration') == 0.1
+
+
+@pytest.mark.parametrize('name', ['iti_duration', 'to_duration'])
+def test_latched_apply_that_cannot_be_evaluated_keeps_settings(name):
+    '''
+    The changes pass validation but fail when evaluated (e.g., `1/0`). They
+    would only fail after the trial ends, when the timeout or intertrial
+    interval starts, which would leave no timer running.
+    '''
+    plugin = make_plugin(target_probability=0)
+    plugin.start_by_poking()
+    change(plugin, level_list=[80])
+    plugin.request_apply()
+    assert plugin._apply_latched
+    change(plugin, **{name: Expression('1/0')})
+
+    plugin.respond(1)  # False alarm, so there is a timeout
+    assert len(plugin.h_results) == 1
+    assert plugin.h_messages == [('critical', 'Cannot apply changes')]
+    assert not plugin._apply_latched
+    assert plugin.context.ns.applied == 0
+
+    plugin.release(1)
+    plugin.fire()  # Timeout
+    plugin.fire()  # ITI
+    assert plugin.trial_state == S.waiting_for_np_start
+    plugin.start_by_poking()
+    plugin.respond(1)
+    assert len(plugin.h_results) == 2
+
+
+def test_state_parameter_using_trial_value_is_applied():
+    # `level` is only known once a trial is prepared, so it cannot be
+    # evaluated when Apply is clicked.
+    plugin = make_plugin(target_probability=1)
+    change(plugin, iti_duration=Expression('level / 100'))
+    plugin.request_apply()
+    assert plugin.h_messages == []
+    assert plugin.context.ns.applied == 1
+
+
+@pytest.mark.parametrize('request_name', ['request_trial', 'request_remind'])
+def test_ending_iti_early_takes_latched_pause(request_name):
+    plugin = make_plugin(target_probability=1, remind_trials=0,
+                         warmup_trials=0)
+    plugin.start_by_poking()
+    plugin.request_pause()
+    assert plugin._pause_latched
+    plugin.respond(1)
+    plugin.release(1)
+    assert plugin.trial_state == S.waiting_for_iti
+    n_started = len(plugin.h_start_states)
+
+    getattr(plugin, request_name)()
+    assert plugin.experiment_state == 'paused'
+    assert plugin.trial_state == S.waiting_for_resume
+    assert len(plugin.h_start_states) == n_started
+    assert 'experiment_paused' in plugin.h_actions
+
+    plugin.request_resume()
+    assert plugin.trial_state == S.waiting_for_np_start
+    if request_name == 'request_remind':
+        # The remind trial is the first trial after resuming.
+        assert plugin._remind_requested
+        plugin.start_by_poking()
+        assert plugin.trial_manager._played.source == 'user_remind'
 
 
 def fail_next_prepare(plugin):
