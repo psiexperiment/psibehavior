@@ -194,6 +194,14 @@ class BaseBehaviorPlugin(ControllerPlugin):
             # NI-DAQmx or can be calculated (i.e., we know exactly when the target
             # onset occurs because we precisely specify the location of the target
             # in the analog output buffer).
+            if self.experiment_state == 'stopped':
+                # Stopping cancels the timers, but one that was already due
+                # (e.g., the end of the hold) may still be waiting to run.
+                # It must not carry the trial on: that would start new
+                # timers and log a trial after the data have been saved.
+                log.info('Ignoring %s since the experiment has stopped', event)
+                return
+
             if timestamp is None:
                 timestamp = self.get_ts()
 

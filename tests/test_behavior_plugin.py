@@ -409,3 +409,19 @@ def test_operator_requests_run_on_dispatcher():
         assert all(t is dispatcher._thread for t in plugin.h_threads)
     finally:
         dispatcher.stop()
+
+
+def test_timer_due_at_stop_does_not_continue_trial():
+    plugin = make_plugin(target_probability=1, hold_duration=0.5)
+    plugin.poke()
+    plugin.fire()  # np_duration
+    assert plugin.trial_state == S.waiting_for_hold
+
+    # The experiment stops while the end of the hold is already on its way
+    # to the dispatcher.
+    _, hold_elapsed = plugin.h_timers.pop('event')
+    plugin.experiment_state = 'stopped'
+    hold_elapsed()
+    assert plugin.trial_state == S.waiting_for_hold
+    assert 'event' not in plugin.h_timers
+    assert 'trial_end' not in plugin.h_actions
