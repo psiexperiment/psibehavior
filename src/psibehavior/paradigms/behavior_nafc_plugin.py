@@ -200,7 +200,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         super().handle_event(event, timestamp)
 
     def request_trial(self):
-        self._submit(self._request_trial)
+        self._submit_request(self._request_trial)
 
     def _request_trial(self):
         if self.experiment_state != 'running':
@@ -214,6 +214,9 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             # Skip the rest of the intertrial interval.
             self.stop_event_timer()
             self.prepare_trial(auto_start=True)
+        elif self.trial_state == NAFCTrialState.waiting_for_trial_start:
+            # The last attempt to prepare a trial failed. Try again.
+            self.prepare_trial(auto_start=True)
         else:
             log.warning('Cannot start a trial while %s', self.trial_state.value)
 
@@ -221,7 +224,8 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         self._remind_requested = True
         if self.experiment_state != 'running':
             return
-        if self.trial_state == NAFCTrialState.waiting_for_np_start:
+        if self.trial_state in (NAFCTrialState.waiting_for_np_start,
+                                NAFCTrialState.waiting_for_trial_start):
             self.prepare_trial(auto_start=True)
         elif self.trial_state == NAFCTrialState.waiting_for_iti:
             self.stop_event_timer()
@@ -231,12 +235,15 @@ class BehaviorPlugin(BaseBehaviorPlugin):
     def apply_changes(self):
         if self.trial_state in IN_FLIGHT:
             return False
-        self._apply_context()
+        if not self._apply_context():
+            return True
         # Only a prepared trial that has not started needs to be prepared
         # again. In any other state (e.g., intertrial interval, timeout,
         # waiting for resume), the next trial will be prepared with the new
-        # values when the time comes.
-        if self.trial_state == NAFCTrialState.waiting_for_np_start:
+        # values when the time comes. In `waiting_for_trial_start`, the last
+        # attempt to prepare a trial failed, so the new values may fix it.
+        if self.trial_state in (NAFCTrialState.waiting_for_np_start,
+                                NAFCTrialState.waiting_for_trial_start):
             self.prepare_trial()
         return True
 
@@ -286,10 +293,22 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         self.trial_state = NAFCTrialState.waiting_for_trial_start
 
         #: TODO: Allow for capturing additional info here.
+        try:
+            conditions = self.trial_manager.prepare_trial()
+        except Exception as e:
+            # E.g., a stimulus parameter the trial manager cannot handle. Stay
+            # in `waiting_for_trial_start`, where the animal cannot start a
+            # trial. Apply, Request Remind, Start Trial and Resume all try
+            # again.
+            log.exception('Unable to prepare the next trial')
+            self.trial_state_str = f'Unable to prepare the next trial: {e}'
+            self.report_error(
+                'Unable to prepare the next trial',
+                f'{e}\n\nCorrect the settings and click Apply to try again.')
+            return
         self.response_condition, \
             self.reward_condition, \
-            self.timeout_condition = \
-            self.trial_manager.prepare_trial()
+            self.timeout_condition = conditions
 
         # Now trigger any callbacks that are listening for the trial_ready
         # event.
@@ -335,8 +354,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             # while the animal was poking can take effect.
             if self._pause_latched:
                 self._pause_now()
-            if self._apply_latched:
-                self._apply_context()
+            if self._apply_latched and self._apply_context():
                 self.prepare_trial()
             elif self._remind_requested:
                 # Replace the prepared trial with a remind trial.
@@ -562,7 +580,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
                 self.prepare_trial()
 
     def start_random_behavior(self):
-        self._submit(self._start_random_behavior)
+        self._submit_request(self._start_random_behavior)
 
     def _start_random_behavior(self):
         log.info('Starting random behavior mode')
@@ -571,6 +589,12 @@ class BehaviorPlugin(BaseBehaviorPlugin):
                          partial(self.random_behavior_cb, self.events.digital_np_start))
 
     def stop_random_behavior(self):
+        # Must go through the dispatcher too. Otherwise, a quick on-off toggle
+        # can stop before the start runs, leaving random behavior running.
+        self._submit(self._stop_random_behavior)
+
+    def _stop_random_behavior(self):
+        log.info('Stopping random behavior mode')
         self.random_behavior_mode = False
         self.stop_timer('random_behavior')
 

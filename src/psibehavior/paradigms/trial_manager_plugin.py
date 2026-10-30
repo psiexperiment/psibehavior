@@ -20,6 +20,10 @@ class BaseTrialManager:
     #: EpochWaveform instance used for managing waveform.
     waveform = None
 
+    #: The `manager_kwargs` set on the `TrialManagerManifest` (set by
+    #: `configure_trial_manager` after the manager is created).
+    manager_kwargs = {}
+
     @classmethod
     def get_default_parameters(cls, **kwargs):
         '''
@@ -169,6 +173,10 @@ class NAFCTrialManager(BaseTrialManager):
         #: via `deliver_reward`.
         self._warned_reference_reward = False
 
+        #: True if the trial being activated is a reference trial rewarded
+        #: via `deliver_reward` (see `reward_reference`).
+        self._legacy_reference_reward = False
+
     ############################################################################
     # Trial lifecycle
     ############################################################################
@@ -182,22 +190,33 @@ class NAFCTrialManager(BaseTrialManager):
         repeatedly before the trial starts neither re-draws the stimulus nor
         double-counts anything.
         '''
+        if self._played is not None:
+            # The plugin never prepares while a trial is in progress. If it
+            # did, planning would overwrite the context values (and status
+            # line) of the trial that is playing.
+            log.error('Cannot prepare a trial while a trial is in progress')
+            return self.get_conditions(self._played.stim)
+
         remind_requested = bool(self.controller._remind_requested)
         key = (self._snapshot(), remind_requested, self.trial_number)
 
-        pending = self._pending
-        if pending is not None and not pending.started:
-            if pending.key == key:
-                log.info('Reusing prepared trial')
-                return self._activate(pending)
-            log.info('Discarding prepared trial')
-            with self.output.engine.lock:
-                pending.waveform.cancel()
+        old = self._pending
+        if old is not None and old.key == key:
+            log.info('Reusing prepared trial')
+            return self._activate(old)
 
+        # Build the new trial before discarding the old one. If planning
+        # fails (e.g., an invalid stimulus parameter), the old trial is left
+        # intact and its key no longer matches, so the next prepare plans
+        # again. Reverting the change then reuses the old trial, which must
+        # therefore not have been cancelled.
         stim, source = self._plan(remind_requested)
         waveform = self.stim_waveform(stim)
         with self.output.engine.lock:
             waveform = self.output.add_waveform(waveform)
+            if old is not None:
+                log.info('Discarding prepared trial')
+                old.waveform.cancel()
         pending = PreparedTrial(stim=stim, waveform=waveform, key=key,
                                 source=source)
         self._pending = pending
@@ -205,8 +224,11 @@ class NAFCTrialManager(BaseTrialManager):
         return self._activate(pending)
 
     def start_trial(self, delay):
+        if self._played is not None:
+            raise RuntimeError('Cannot start a trial while a trial is in '
+                               'progress')
         pending = self._pending
-        if pending is None or pending.started:
+        if pending is None:
             raise RuntimeError('No prepared trial to start')
         with self.output.engine.lock:
             ts = self.controller.get_ts()
@@ -222,11 +244,14 @@ class NAFCTrialManager(BaseTrialManager):
         return ts
 
     def end_trial(self, delay=0):
-        trial = self._played if self._played is not None else self._pending
-        if trial is None:
-            return
-        with self.output.engine.lock:
-            trial.waveform.cancel()
+        if self._played is not None:
+            with self.output.engine.lock:
+                self._played.waveform.cancel()
+        elif self._pending is not None:
+            # Drop it as well, so that it cannot be reused.
+            with self.output.engine.lock:
+                self._pending.waveform.cancel()
+            self._pending = None
 
     def trial_complete(self, response, score, info):
         played = self._played
@@ -263,7 +288,10 @@ class NAFCTrialManager(BaseTrialManager):
         any of these change (e.g., the user applies a change to the stimulus
         parameters), the prepared trial is discarded and re-planned.
         '''
-        names = [f'{self.prefix}{p["name"]}' for p in self.default_parameters
+        # Use the parameters actually added to the GUI, which may depend on
+        # the manifest's `manager_kwargs`.
+        parameters = type(self).get_default_parameters(**self.manager_kwargs)
+        names = [f'{self.prefix}{p["name"]}' for p in parameters
                  if p.get('type', 'Parameter') != 'Result']
         names.append('repeat_incorrect')
         values = []
@@ -346,8 +374,15 @@ class NAFCTrialManager(BaseTrialManager):
         # clears values set in the context, so a reused trial must be written
         # again.
         self.context.set_values(trial.stim)
-        self.controller.trial_state_str = self.get_trial_state_str(trial.stim)
-        return self.get_conditions(trial.stim)
+        self._legacy_reference_reward = False
+        conditions = self.get_conditions(trial.stim)
+        trial_state_str = self.get_trial_state_str(trial.stim)
+        if self._legacy_reference_reward:
+            # The GUI setting says references are not rewarded. Make it
+            # obvious that this one will be.
+            trial_state_str = f'{trial_state_str} (rewarded via deliver_reward)'
+        self.controller.trial_state_str = trial_state_str
+        return conditions
 
     ############################################################################
     # Conditions
@@ -401,11 +436,18 @@ class NAFCTrialManager(BaseTrialManager):
         # reference trials that way (e.g., ModulationTask with
         # `max_reward_depth` >= 0) so existing settings behave as before.
         if self.deliver_reward(stim):
+            self._legacy_reference_reward = True
             if not self._warned_reference_reward:
-                log.warning('deliver_reward returned True for a reference '
-                            'trial. Correct reference responses will be '
-                            'rewarded. Use reward_correct_reference instead.')
                 self._warned_reference_reward = True
+                self.controller.report_warning(
+                    'Reference trials will be rewarded',
+                    'Correct responses on reference trials will be rewarded '
+                    'even though "Reward correct reference responses?" is '
+                    f'unchecked, because {type(self).__name__}.deliver_reward '
+                    'rewards the reference stimulus (e.g., ModulationTask '
+                    'with "Max. reward STM depth" of 0 or more). Check "Reward '
+                    'correct reference responses?" to make this explicit, or '
+                    'change the setting that causes it.')
             return True
         return False
 

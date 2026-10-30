@@ -23,6 +23,8 @@ def configure_trial_manager(manifest, event):
     # does not accept extra keyword arguments keep working.
     controller.trial_manager = manager_class(controller, prefix=manifest.prefix,
                                              **manifest.manager_kwargs)
+    # Needed to know which parameters `get_default_parameters` added.
+    controller.trial_manager.manager_kwargs = manifest.manager_kwargs
 
 
 def generate_context_items(manifest, workbench):

@@ -35,6 +35,15 @@ DEFAULT_PARAMETERS = {
 }
 
 
+class Invalid:
+    '''
+    A parameter value that fails validation (e.g., an expression with a typo).
+    '''
+
+    def __init__(self, message='invalid expression'):
+        self.message = message
+
+
 class ContextNamespace:
     '''
     Mimics the parts of the psiexperiment context plugin used by trial
@@ -70,7 +79,15 @@ class ContextNamespace:
     def change(self, **parameters):
         self.pending.update(parameters)
 
+    def validate_expressions(self):
+        # Like psiexperiment, this checks the changes that have not been
+        # applied yet.
+        for name, value in self.pending.items():
+            if isinstance(value, Invalid):
+                raise ValueError(f'"{name}": {value.message}')
+
     def apply_changes(self):
+        self.validate_expressions()
         self.parameters.update(self.pending)
         self.pending = {}
         self.applied += 1
@@ -133,9 +150,13 @@ class StubController:
         self.trial_state_str = ''
         self.output = FakeOutput()
         self.ts = 0.0
+        self.warnings = []
 
     def get_ts(self):
         return self.ts
+
+    def report_warning(self, title, message):
+        self.warnings.append(title)
 
     def get_output(self, name):
         return self.output
@@ -180,6 +201,9 @@ class ToyMixin:
         return f'{stim["level"]} dB'
 
     def stim_waveform(self, stim):
+        # Lets tests make planning fail (e.g., level_list=[-1]).
+        if stim['level'] < 0:
+            raise ValueError(f'Invalid level {stim["level"]}')
         return np.full(10, float(stim['level']))
 
 
@@ -221,13 +245,20 @@ class Subject:
         return f'resp_{side}', score
 
 
-def run_trial(manager, subject, extra_prepares=0, between_prepares=None):
+def run_trial(manager, subject, extra_prepares=0, between_prepares=None,
+              before_prepare=None, during_trial=None):
     '''
     Run one trial through the manager the way BehaviorPlugin does.
+
+    `before_prepare` and `during_trial` are called with the controller before
+    the trial is prepared and once it has started (e.g., to request a remind
+    trial).
 
     Returns the logged row.
     '''
     controller = manager.controller
+    if before_prepare is not None:
+        before_prepare(controller)
     conditions = manager.prepare_trial()
     for i in range(extra_prepares):
         if between_prepares is not None:
@@ -235,6 +266,8 @@ def run_trial(manager, subject, extra_prepares=0, between_prepares=None):
         conditions = manager.prepare_trial()
     trial_type = controller.context.get_value('trial_type')
     manager.start_trial(0.5)
+    if during_trial is not None:
+        during_trial(controller)
     response, score = subject.respond(trial_type)
     info = {'response': response, 'score': score.name}
     if score == NAFCTrialScore.invalid:

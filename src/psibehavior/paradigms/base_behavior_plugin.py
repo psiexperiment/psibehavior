@@ -6,6 +6,7 @@ from functools import partial
 from threading import RLock
 
 from atom.api import Bool, Int, Typed, Value
+import enaml
 from enaml.core.api import Conditional
 from enaml.application import deferred_call
 from enaml.workbench.api import Extension
@@ -80,6 +81,22 @@ class BaseBehaviorPlugin(ControllerPlugin):
                 fn(*args, **kw)
         self._dispatcher.submit(run)
 
+    def _submit_request(self, fn, *args, **kw):
+        '''
+        Run the operator request `fn` on the control dispatcher thread
+        without waiting.
+
+        The request is dropped if, by the time it runs, the experiment is
+        not running or paused (e.g., a click that was queued behind Stop).
+        '''
+        def run():
+            if self.experiment_state not in ('running', 'paused'):
+                log.info('Ignoring %s since the experiment is %s',
+                         fn.__name__, self.experiment_state)
+                return
+            fn(*args, **kw)
+        self._submit(run)
+
     def submit_event(self, event):
         '''
         Handle `event` (e.g., simulated from the toolbar) on the dispatcher.
@@ -87,18 +104,50 @@ class BaseBehaviorPlugin(ControllerPlugin):
         self._submit(self.handle_event, event)
 
     def request_apply(self):
-        self._submit(self._request_apply)
+        self._submit_request(self._request_apply)
 
     def request_pause(self):
-        self._submit(self._request_pause)
+        self._submit_request(self._request_pause)
 
     def request_resume(self):
-        self._submit(self._request_resume)
+        self._submit_request(self._request_resume)
 
     def request_remind(self):
-        self._submit(self._request_remind)
+        self._submit_request(self._request_remind)
+
+    def report_error(self, title, message):
+        '''
+        Tell the operator about a problem found on the dispatcher thread.
+
+        Exceptions raised on the dispatcher are only logged, so anything the
+        operator needs to act on must be reported here.
+        '''
+        log.error('%s: %s', title, message)
+        deferred_call(self._show_message, 'critical', title, message)
+
+    def report_warning(self, title, message):
+        '''
+        Like `report_error`, for something the operator should know about
+        but that does not stop the experiment.
+        '''
+        log.warning('%s: %s', title, message)
+        deferred_call(self._show_message, 'warning', title, message)
+
+    def _show_message(self, kind, title, message):
+        # Runs on the GUI thread. `kind` names a function in
+        # enaml.stdlib.message_box (e.g., 'critical' or 'warning').
+        with enaml.imports():
+            from enaml.stdlib import message_box
+        getattr(message_box, kind)(None, title, message)
 
     def _request_apply(self):
+        # Check the changes now so that a typo is reported when Apply is
+        # clicked rather than when the latched request is acted on.
+        try:
+            self.context.validate_expressions()
+        except Exception as e:
+            self.report_error('Cannot apply changes', str(e))
+            return
         if not self.apply_changes():
             log.info('Apply requested')
             self._set_apply_latch(True)
@@ -134,6 +183,10 @@ class BaseBehaviorPlugin(ControllerPlugin):
         return False
 
     def _pause_now(self):
+        if self.experiment_state != 'running':
+            # E.g., stopped. Pausing would revive the experiment state.
+            self._set_pause_latch(False)
+            return
         self.experiment_state = 'paused'
         self._set_pause_latch(False)
         self.invoke_actions('experiment_paused', self.get_ts())
@@ -152,8 +205,8 @@ class BaseBehaviorPlugin(ControllerPlugin):
 
     def apply_changes(self):
         if self.can_modify():
-            self._apply_context()
-            self.prepare_trial()
+            if self._apply_context():
+                self.prepare_trial()
             return True
         return False
 
@@ -164,11 +217,24 @@ class BaseBehaviorPlugin(ControllerPlugin):
         This clears any values set in the context (e.g., the stimulus of the
         current trial), so it must not be called between preparing a trial and
         logging its result.
+
+        Returns True if the changes were applied. If they could not be applied
+        (e.g., an invalid expression), the operator is told, the request is
+        cleared so that Apply can be clicked again once the problem is fixed,
+        and False is returned. This never raises: callers apply changes at
+        safe points in the state machine, and the state machine must carry on
+        whether or not the changes were applied.
         '''
         log.info('Applying changes')
-        self.context.apply_changes()
-        self.context.next_setting()
         self._set_apply_latch(False)
+        try:
+            self.context.apply_changes()
+        except Exception as e:
+            log.exception('Unable to apply changes')
+            self.report_error('Cannot apply changes', str(e))
+            return False
+        self.context.next_setting()
+        return True
 
     def et_callback(self, name, edge, event_time):
         event = self.event_map[edge, name]

@@ -10,7 +10,7 @@ import pytest
 
 from psibehavior.paradigms.behavior_nafc_plugin import (BehaviorPlugin,
                                                         NAFCTrialState as S)
-from stubs import ContextNamespace, FakeOutput, ToyManager
+from stubs import ContextNamespace, FakeOutput, Invalid, ToyManager
 
 
 class StubContextPlugin(Plugin):
@@ -29,6 +29,9 @@ class StubContextPlugin(Plugin):
     def set_values(self, values):
         self.ns.set_values(values)
 
+    def validate_expressions(self):
+        self.ns.validate_expressions()
+
     def apply_changes(self):
         self.ns.apply_changes()
 
@@ -46,12 +49,29 @@ class HarnessPlugin(BehaviorPlugin):
     h_inline = Bool(True)
     h_threads = Value(factory=list)
 
+    #: (kind, title) of each message shown to the operator.
+    h_messages = Value(factory=list)
+
+    #: Experiment state each time a trial started.
+    h_start_states = Value(factory=list)
+
+    #: If True, timers run on the real dispatcher (`call_later`) and every
+    #: action makes a round trip through the dispatcher, as
+    #: `invoke_actions(wait=True)` does. Otherwise, timers are fired by hand
+    #: with `fire`.
+    h_real = Bool(False)
+
     def invoke_actions(self, event_name, timestamp=None, delayed=False,
                        cancel_existing=True, kw=None, skip_errors=False,
                        wait=True):
         self.h_actions.append(event_name)
         if event_name == 'trial_end':
             self.h_results.append(kw['result'])
+        if self.h_real:
+            # Runs inline on the dispatcher thread. From any other thread
+            # (e.g., the GUI holding `lock`), this waits for the dispatcher,
+            # which is how the deadlock fixed in M0 arose.
+            self._dispatcher.submit_sync(lambda: None)
 
     def get_ts(self):
         return self.h_ts
@@ -60,10 +80,23 @@ class HarnessPlugin(BehaviorPlugin):
         return self.h_output
 
     def start_timer(self, name, duration, callback, cancel_existing=True):
-        self.h_timers[name] = (duration, callback)
+        if self.h_real:
+            super().start_timer(name, duration, callback, cancel_existing)
+        else:
+            self.h_timers[name] = (duration, callback)
 
     def stop_timer(self, name):
-        self.h_timers.pop(name, None)
+        if self.h_real:
+            super().stop_timer(name)
+        else:
+            self.h_timers.pop(name, None)
+
+    def start_trial(self):
+        self.h_start_states.append(self.experiment_state)
+        super().start_trial()
+
+    def _show_message(self, kind, title, message):
+        self.h_messages.append((kind, title))
 
     def _submit(self, fn, *args, **kw):
         if self.h_inline:
@@ -370,14 +403,29 @@ def test_reward_delivered_training_mode():
     assert plugin.h_results[-1]['reward_delivered'] is True
 
 
-def test_operator_requests_run_on_dispatcher():
+def drain(dispatcher, timeout=30):
+    done = threading.Event()
+    dispatcher.submit(done.set)
+    assert done.wait(timeout=timeout), 'Dispatcher did not drain (deadlock?)'
+
+
+@pytest.mark.parametrize('real', [False, True])
+def test_operator_requests_run_on_dispatcher(real):
     '''
     Operator requests and hardware/timer events fired from several threads
     must all run on the control dispatcher and never deadlock.
+
+    With `real`, timers run on the dispatcher's own `call_later` and every
+    action makes a round trip through the dispatcher, so a request handled
+    on the calling thread while holding `lock` (as before M0) deadlocks and
+    fails this test.
     '''
-    plugin = make_plugin(target_probability=0.5)
+    durations = dict(np_duration=0.002, iti_duration=0.002, to_duration=0.002,
+                     response_duration=0.005)
+    plugin = make_plugin(target_probability=0.5, **(durations if real else {}))
     plugin.h_threads.clear()
     plugin.h_inline = False
+    plugin.h_real = real
     dispatcher = plugin._dispatcher
 
     def operator():
@@ -395,18 +443,38 @@ def test_operator_requests_run_on_dispatcher():
             plugin.submit_event(plugin.events.resp_1_start)
             plugin.submit_event(plugin.events.resp_1_end)
 
+    def stop():
+        plugin.experiment_state = 'stopped'
+        plugin.stop_all_timers()
+
     threads = [threading.Thread(target=operator), threading.Thread(target=animal)]
     try:
         for t in threads:
             t.start()
         for t in threads:
             t.join(timeout=30)
-            assert not t.is_alive()
-        done = threading.Event()
-        dispatcher.submit(done.set)
-        assert done.wait(timeout=30), 'Dispatcher did not drain (deadlock?)'
+            assert not t.is_alive(), 'Request thread blocked (deadlock?)'
+        drain(dispatcher)
         assert plugin.h_threads
         assert all(t is dispatcher._thread for t in plugin.h_threads)
+
+        if real:
+            # Stop on the dispatcher so that no timer fires afterwards.
+            dispatcher.submit(stop)
+            drain(dispatcher)
+            waveforms = plugin.h_output.waveforms
+            started = [w for w in waveforms if w.started]
+            queued = [w for w in waveforms if not w.started and not w.cancelled]
+            in_flight = plugin.trial_state in (S.waiting_for_hold,
+                                               S.waiting_for_response)
+            assert started
+            # No trial ever started while paused.
+            assert 'paused' not in plugin.h_start_states
+            # At most one prepared trial is waiting on the output.
+            assert len(queued) <= 1
+            # Every trial that started was logged exactly once (except one
+            # still in progress when the experiment stopped).
+            assert len(started) == len(plugin.h_results) + in_flight
     finally:
         dispatcher.stop()
 
@@ -425,3 +493,215 @@ def test_timer_due_at_stop_does_not_continue_trial():
     assert plugin.trial_state == S.waiting_for_hold
     assert 'event' not in plugin.h_timers
     assert 'trial_end' not in plugin.h_actions
+
+
+def test_invalid_apply_rejected_when_requested():
+    plugin = make_plugin(target_probability=1)
+    plugin.start_by_poking()
+    change(plugin, level_list=Invalid())
+    plugin.request_apply()
+    # Reported now, not latched for the end of the trial.
+    assert plugin.h_messages == [('critical', 'Cannot apply changes')]
+    assert not plugin._apply_latched
+
+    plugin.respond(1)
+    plugin.release(1)
+    assert plugin.trial_state == S.waiting_for_iti
+    assert plugin.context.ns.applied == 0
+
+
+@pytest.mark.parametrize('iti_duration', [0, 0.1])
+def test_latched_apply_that_fails_does_not_hang_trial(iti_duration):
+    '''
+    The changes are valid when Apply is clicked, but are edited (e.g., a typo)
+    before the trial ends. The trial must still end normally.
+    '''
+    plugin = make_plugin(target_probability=1, iti_duration=iti_duration)
+    plugin.start_by_poking()
+    change(plugin, level_list=[80])
+    plugin.request_apply()
+    assert plugin._apply_latched
+    change(plugin, target_probability=Invalid())
+
+    plugin.respond(1)
+    assert len(plugin.h_results) == 1
+    assert plugin.h_messages == [('critical', 'Cannot apply changes')]
+    # Cleared so that Apply can be clicked again.
+    assert not plugin._apply_latched
+    assert not plugin._apply_requested
+
+    plugin.release(1)
+    if iti_duration:
+        plugin.fire()  # ITI
+    assert plugin.trial_state == S.waiting_for_np_start
+    # The next trial runs with the settings that were in effect.
+    assert plugin.context.get_value('level') in (20, 40, 60)
+    plugin.start_by_poking()
+    plugin.respond(1)
+    assert len(plugin.h_results) == 2
+
+    # Fixing the typo and applying again works.
+    change(plugin, target_probability=1)
+    plugin.release(1)
+    if iti_duration:
+        plugin.fire()  # ITI
+    plugin.request_apply()
+    assert plugin.context.ns.applied == 1
+    assert plugin.context.get_value('level') == 80
+
+
+def test_latched_apply_that_fails_at_withdrawal():
+    plugin = make_plugin(target_probability=1)
+    plugin.poke()
+    first = plugin.h_output.waveforms[-1]
+    change(plugin, level_list=[80])
+    plugin.request_apply()
+    change(plugin, target_probability=Invalid())
+
+    plugin.withdraw()
+    assert plugin.trial_state == S.waiting_for_np_start
+    assert plugin.h_messages == [('critical', 'Cannot apply changes')]
+    # The prepared trial is kept.
+    assert not first.cancelled
+    plugin.start_by_poking()
+    assert first.started
+
+
+def fail_next_prepare(plugin):
+    '''
+    Apply a change that the trial manager cannot plan with.
+    '''
+    change(plugin, level_list=[-1])
+    plugin.request_apply()
+    assert plugin.trial_state == S.waiting_for_trial_start
+    assert plugin.h_messages[-1] == ('critical', 'Unable to prepare the next trial')
+    assert plugin.trial_state_str.startswith('Unable to prepare')
+
+
+def test_failed_prepare_recovers_on_apply():
+    plugin = make_plugin(target_probability=1)
+    n = plugin.n_waveforms
+    fail_next_prepare(plugin)
+
+    # The animal cannot start a trial.
+    plugin.poke()
+    assert plugin.trial_state == S.waiting_for_trial_start
+    plugin.withdraw()
+    assert plugin.n_waveforms == n
+
+    change(plugin, level_list=[80])
+    plugin.request_apply()
+    assert plugin.trial_state == S.waiting_for_np_start
+    assert plugin.context.get_value('level') == 80
+    plugin.start_by_poking()
+    assert plugin.h_output.waveforms[-1].started
+
+
+def test_failed_prepare_reverted_plays_original_trial():
+    '''
+    Reverting the change reuses the trial prepared before it. That trial
+    must not have been cancelled (it would play silently).
+    '''
+    plugin = make_plugin(target_probability=1)
+    first = plugin.h_output.waveforms[-1]
+    level = plugin.context.get_value('level')
+    fail_next_prepare(plugin)
+    assert not first.cancelled
+
+    change(plugin, level_list=[20, 40, 60])
+    plugin.request_apply()
+    assert plugin.trial_state == S.waiting_for_np_start
+    assert plugin.context.get_value('level') == level
+    plugin.start_by_poking()
+    assert first.started and not first.cancelled
+    plugin.respond(1)
+    assert plugin.h_results[-1]['stim_complete']
+
+
+def test_failed_prepare_at_end_of_iti():
+    plugin = make_plugin(target_probability=1)
+    plugin.start_by_poking()
+    change(plugin, level_list=[-1])
+    plugin.request_apply()
+    plugin.respond(1)
+    plugin.release(1)
+    plugin.fire()  # ITI
+    assert plugin.trial_state == S.waiting_for_trial_start
+    assert plugin.h_messages[-1] == ('critical', 'Unable to prepare the next trial')
+
+
+@pytest.mark.parametrize('request_name', ['request_trial', 'request_remind'])
+def test_failed_prepare_recovers_on_request(request_name):
+    plugin = make_plugin(target_probability=1)
+    fail_next_prepare(plugin)
+    # The change was applied, so the settings must be fixed first; until
+    # then, each request fails the same way.
+    getattr(plugin, request_name)()
+    assert plugin.trial_state == S.waiting_for_trial_start
+    plugin.context.ns.parameters['level_list'] = [60]
+    getattr(plugin, request_name)()
+    assert plugin.trial_state == S.waiting_for_response
+
+
+def test_failed_prepare_recovers_on_resume():
+    plugin = make_plugin(target_probability=1)
+    fail_next_prepare(plugin)
+    plugin.request_pause()
+    assert plugin.experiment_state == 'paused'
+    change(plugin, level_list=[60])
+    plugin.request_apply()
+    plugin.request_resume()
+    assert plugin.trial_state == S.waiting_for_np_start
+    assert plugin.context.get_value('level') == 60
+
+
+@pytest.mark.parametrize('request_name', ['request_apply', 'request_pause',
+                                          'request_resume', 'request_remind',
+                                          'request_trial',
+                                          'start_random_behavior'])
+def test_requests_ignored_after_stop(request_name):
+    plugin = make_plugin(target_probability=1)
+    change(plugin, level_list=[80])
+    n = plugin.n_waveforms
+    plugin.experiment_state = 'stopped'
+    getattr(plugin, request_name)()
+    assert plugin.experiment_state == 'stopped'
+    assert plugin.n_waveforms == n
+    assert plugin.context.ns.applied == 0
+    assert not plugin.random_behavior_mode
+    assert 'random_behavior' not in plugin.h_timers
+
+
+def test_latched_pause_after_stop_does_not_pause():
+    plugin = make_plugin(target_probability=1)
+    plugin.poke()
+    plugin.request_pause()
+    assert plugin._pause_latched
+    plugin.experiment_state = 'stopped'
+    plugin._pause_now()
+    assert plugin.experiment_state == 'stopped'
+    assert not plugin._pause_latched
+    assert 'experiment_paused' not in plugin.h_actions
+
+
+def test_random_behavior_toggle_stays_in_order():
+    '''
+    A quick on-off toggle must leave random behavior off, even when the
+    dispatcher is busy when the toggle happens.
+    '''
+    plugin = make_plugin()
+    plugin.h_inline = False
+    dispatcher = plugin._dispatcher
+    release = threading.Event()
+    try:
+        # Keep the dispatcher busy so both requests are queued.
+        dispatcher.submit(release.wait, 10)
+        plugin.start_random_behavior()
+        plugin.stop_random_behavior()
+        release.set()
+        drain(dispatcher)
+        assert not plugin.random_behavior_mode
+        assert 'random_behavior' not in plugin.h_timers
+    finally:
+        release.set()
+        dispatcher.stop()
