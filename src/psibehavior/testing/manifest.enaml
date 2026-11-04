@@ -1,6 +1,6 @@
 '''
 The context items an N-AFC behavior experiment declares, for building a real
-psiexperiment context in the tests (see `context.make_context`).
+psiexperiment context in tests (see `psibehavior.testing.make_context`).
 '''
 from enaml.workbench.api import Extension
 

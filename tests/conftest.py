@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 @pytest.fixture(scope='session', autouse=True)
 def app():
     '''
-    The tests build real psiexperiment contexts (see `context.make_context`),
+    The tests build real psiexperiment contexts (see `psibehavior.testing`),
     which need the enaml application. Enaml allows only one per process.
     '''
     from enaml.application import Application
@@ -19,10 +19,10 @@ def app():
 
 
 @pytest.fixture(autouse=True)
-def stop_workbenches():
+def stop_contexts():
     yield
-    from context import stop_workbenches
-    stop_workbenches()
+    from psibehavior import testing
+    testing.stop_workbenches()
 
 
 @pytest.fixture(autouse=True)
