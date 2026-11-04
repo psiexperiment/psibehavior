@@ -50,7 +50,6 @@ enamldef BehaviorContextItems(Extension): items:
 
     #: As for `BehaviorManifest`.
     attr N_response = 1
-    attr reward_reference_option = True
 
     ContextGroup:
         name = 'hardware_settings'
@@ -104,18 +103,6 @@ enamldef BehaviorContextItems(Extension): items:
                     'All trials': 2,
                 }
                 scope = 'arbitrary'
-            Conditional:
-                condition = items.reward_reference_option
-                BoolParameter:
-                    # Previously, correct responses on reference trials
-                    # were rewarded only if the trial manager's
-                    # `deliver_reward` returned True for the reference
-                    # stimulus. Now `deliver_reward` applies to targets
-                    # only.
-                    name = 'reward_correct_reference'
-                    label = 'Reward correct reference responses?'
-                    scope = 'arbitrary'
-                    default = True
 
         Parameter:
             name = 'np_duration'
@@ -244,11 +231,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     #: Show Request Remind in the toolbar? Set to False for paradigms whose
     #: trial manager has no remind trials.
     attr remind_button = True
-
-    #: Include "Reward correct reference responses?" (N-AFC only)? Set to
-    #: False for paradigms whose trial manager decides which responses are
-    #: rewarded without it (i.e., overrides `get_conditions`).
-    attr reward_reference_option = True
 
     factory = lambda: BehaviorPlugin(N_response=N_response,
                                      response_name=response_name)
@@ -387,7 +369,6 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
     BehaviorContextItems:
         id = manifest.id + '.items'
         N_response = manifest.N_response
-        reward_reference_option = manifest.reward_reference_option
 
     Extension:
         id = manifest.id + '.toolbar'

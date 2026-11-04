@@ -35,15 +35,6 @@ that were not scored as correct. Repeats are not used during remind and warmup
 trials, when a remind trial has been requested, or when a target is forced
 because the maximum number of consecutive reference trials was reached.
 
-* **Reward correct reference responses?** (N-AFC only) - If checked (the
-default), a correct response on a reference trial is rewarded. If not checked,
-it is scored as correct but not rewarded. The trial manager's `deliver_reward`
-(e.g., withholding rewards for targets near threshold) applies to targets only.
-In earlier versions, references were rewarded only if `deliver_reward` returned
-True for the reference stimulus. Paradigms whose trial manager decides rewards
-itself (by overriding `get_conditions`) leave this setting out by setting
-`reward_reference_option` to False on `BehaviorManifest`.
-
 * **Nose-poke start duration** - Duration of nose poke required to start the
 trial, in seconds. If the animal withdraws before the duration is met, no trial
 begins.

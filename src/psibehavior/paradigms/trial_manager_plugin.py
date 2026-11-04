@@ -397,25 +397,11 @@ class NAFCTrialManager(BaseTrialManager):
                 reward_condition = [1]
                 timeout_condition = []
 
-        if stim['trial_type'] == 'reference':
-            if not self.reward_reference(stim):
-                reward_condition = []
-        elif not self.deliver_reward(stim):
+        if not self.deliver_reward(stim):
             # Override reward condition to not provide a reward if it's near
             # threshold.
             reward_condition = []
         return response_condition, reward_condition, timeout_condition
-
-    def reward_reference(self, stim):
-        '''
-        True if a correct response on a reference trial should be rewarded.
-
-        Only applies when there is a response port for reference trials
-        (N_response > 1) and is controlled by `reward_correct_reference`.
-        '''
-        if self.controller.N_response == 1:
-            return False
-        return self.context.get_value('reward_correct_reference')
 
     ############################################################################
     # Methods subclasses must implement
@@ -425,8 +411,13 @@ class NAFCTrialManager(BaseTrialManager):
 
     def deliver_reward(self, stim):
         '''
-        True if a correct response on a target trial should be rewarded (e.g.,
+        True if a correct response on this trial should be rewarded (e.g.,
         return False for targets near threshold).
+
+        This is asked for reference trials too. With a response port for
+        references (N_response > 1), return True for them to reward correct
+        reference responses. With one port (go/nogo), there is nothing to
+        reward on a reference trial whatever this returns.
         '''
         raise NotImplementedError
 
