@@ -1,50 +1,16 @@
 '''
-State-machine tests for BehaviorPlugin using a stub context, a fake output and
-manually fired timers.
+State-machine tests for BehaviorPlugin using a real context (see
+`context.make_context`), a fake output and manually fired timers.
 '''
 import threading
 
 from atom.api import Bool, Float, Value
-from enaml.workbench.api import Plugin
 import pytest
 
+import context
 from psibehavior.paradigms.behavior_nafc_plugin import (BehaviorPlugin,
                                                         NAFCTrialState as S)
-from stubs import ContextNamespace, Expression, FakeOutput, Invalid, ToyManager
-
-
-class StubContextPlugin(Plugin):
-
-    ns = Value()
-
-    def get_value(self, name):
-        return self.ns.get_value(name)
-
-    def get_values(self):
-        return self.ns.get_values()
-
-    def set_value(self, name, value):
-        self.ns.set_value(name, value)
-
-    def set_values(self, values):
-        self.ns.set_values(values)
-
-    @property
-    def expressions(self):
-        return self.ns.expressions
-
-    @property
-    def symbols(self):
-        return {}
-
-    def validate_expressions(self):
-        self.ns.validate_expressions()
-
-    def apply_changes(self):
-        self.ns.apply_changes()
-
-    def next_setting(self, selector=None):
-        self.ns.next_setting()
+from stubs import FakeOutput, ToyManager
 
 
 class HarnessPlugin(BehaviorPlugin):
@@ -151,11 +117,11 @@ class HarnessPlugin(BehaviorPlugin):
         return len(self.h_output.waveforms)
 
 
-def make_plugin(N_response=1, **parameters):
-    parameters.setdefault('remind_trials', 0)
-    parameters.setdefault('warmup_trials', 0)
+def make_plugin(N_response=1, **settings):
+    settings.setdefault('remind_trials', 0)
+    settings.setdefault('warmup_trials', 0)
     plugin = HarnessPlugin(N_response=N_response, response_name='resp')
-    plugin.context = StubContextPlugin(ns=ContextNamespace(**parameters))
+    plugin.context = context.make_context(N_response=N_response, **settings)
     plugin.h_output = FakeOutput()
     plugin.trial_manager = ToyManager(plugin)
     plugin.experiment_state = 'running'
@@ -163,8 +129,19 @@ def make_plugin(N_response=1, **parameters):
     return plugin
 
 
-def change(plugin, **parameters):
-    plugin.context.ns.change(**parameters)
+def change(plugin, **settings):
+    context.change(plugin.context, **settings)
+
+
+def change_expression(plugin, name, expression):
+    context.change_expression(plugin.context, name, expression)
+
+
+def applied(plugin):
+    '''
+    True if no changes are waiting to be applied.
+    '''
+    return not plugin.context.changes_pending
 
 
 def test_apply_during_iti_does_not_skip_iti():
@@ -177,7 +154,7 @@ def test_apply_during_iti_does_not_skip_iti():
 
     change(plugin, level_list=[80])
     plugin.request_apply()
-    assert plugin.context.ns.applied == 1
+    assert applied(plugin)
     assert plugin.trial_state == S.waiting_for_iti
     assert 'event' in plugin.h_timers
     assert plugin.n_waveforms == n
@@ -195,8 +172,9 @@ def test_apply_during_timeout_does_not_cut_timeout():
     plugin.release(1)
     assert plugin.trial_state == S.waiting_for_to
 
+    change(plugin, level_list=[80])
     plugin.request_apply()
-    assert plugin.context.ns.applied == 1
+    assert applied(plugin)
     assert plugin.trial_state == S.waiting_for_to
 
     plugin.fire()  # Timeout
@@ -212,7 +190,7 @@ def test_apply_during_trial_applied_after_result_logged(iti_duration):
     change(plugin, level_list=[80])
     plugin.request_apply()
     assert plugin._apply_latched
-    assert plugin.context.ns.applied == 0
+    assert not applied(plugin)
     n = plugin.n_waveforms
 
     plugin.respond(1)
@@ -220,7 +198,7 @@ def test_apply_during_trial_applied_after_result_logged(iti_duration):
     assert result['level'] == level
     assert result['trial_type'] == 'target'
     assert result['level_list'] == [20, 40, 60]
-    assert plugin.context.ns.applied == 1
+    assert applied(plugin)
     assert not plugin._apply_latched
 
     plugin.release(1)
@@ -356,7 +334,7 @@ def test_withdrawal_applies_deferred_changes():
     assert plugin._apply_latched
 
     plugin.withdraw()
-    assert plugin.context.ns.applied == 1
+    assert applied(plugin)
     assert plugin.trial_state == S.waiting_for_np_start
     assert first.cancelled
     assert plugin.context.get_value('level') == 80
@@ -503,19 +481,36 @@ def test_timer_due_at_stop_does_not_continue_trial():
     assert 'trial_end' not in plugin.h_actions
 
 
-def test_invalid_apply_rejected_when_requested():
+def test_invalid_apply_rejected():
     plugin = make_plugin(target_probability=1)
-    plugin.start_by_poking()
-    change(plugin, level_list=Invalid())
+    change_expression(plugin, 'level_list', 'levl_list')
     plugin.request_apply()
-    # Reported now, not latched for the end of the trial.
     assert plugin.h_messages == [('critical', 'Cannot apply changes')]
     assert not plugin._apply_latched
+    assert not applied(plugin)
 
+    # The prepared trial runs with the settings in effect.
+    plugin.start_by_poking()
     plugin.respond(1)
     plugin.release(1)
     assert plugin.trial_state == S.waiting_for_iti
-    assert plugin.context.ns.applied == 0
+
+
+def test_invalid_apply_during_trial_reported_when_trial_ends():
+    plugin = make_plugin(target_probability=1)
+    plugin.start_by_poking()
+    change_expression(plugin, 'level_list', 'levl_list')
+    plugin.request_apply()
+    assert plugin._apply_latched
+    assert plugin.h_messages == []
+
+    plugin.respond(1)
+    assert len(plugin.h_results) == 1
+    assert plugin.h_messages == [('critical', 'Cannot apply changes')]
+    assert not plugin._apply_latched
+    assert not applied(plugin)
+    plugin.release(1)
+    assert plugin.trial_state == S.waiting_for_iti
 
 
 @pytest.mark.parametrize('iti_duration', [0, 0.1])
@@ -529,7 +524,7 @@ def test_latched_apply_that_fails_does_not_hang_trial(iti_duration):
     change(plugin, level_list=[80])
     plugin.request_apply()
     assert plugin._apply_latched
-    change(plugin, target_probability=Invalid())
+    change_expression(plugin, 'target_probability', 'target_probabilty')
 
     plugin.respond(1)
     assert len(plugin.h_results) == 1
@@ -554,7 +549,7 @@ def test_latched_apply_that_fails_does_not_hang_trial(iti_duration):
     if iti_duration:
         plugin.fire()  # ITI
     plugin.request_apply()
-    assert plugin.context.ns.applied == 1
+    assert applied(plugin)
     assert plugin.context.get_value('level') == 80
 
 
@@ -564,7 +559,7 @@ def test_latched_apply_that_fails_at_withdrawal():
     first = plugin.h_output.waveforms[-1]
     change(plugin, level_list=[80])
     plugin.request_apply()
-    change(plugin, target_probability=Invalid())
+    change_expression(plugin, 'target_probability', 'target_probabilty')
 
     plugin.withdraw()
     assert plugin.trial_state == S.waiting_for_np_start
@@ -577,10 +572,10 @@ def test_latched_apply_that_fails_at_withdrawal():
 
 def test_apply_that_cannot_be_evaluated_rejected_when_requested():
     plugin = make_plugin(target_probability=1)
-    change(plugin, iti_duration=Expression('1/0'))
+    change_expression(plugin, 'iti_duration', '1/0')
     plugin.request_apply()
     assert plugin.h_messages == [('critical', 'Cannot apply changes')]
-    assert plugin.context.ns.applied == 0
+    assert not applied(plugin)
     assert plugin.context.get_value('iti_duration') == 0.1
 
 
@@ -596,13 +591,13 @@ def test_latched_apply_that_cannot_be_evaluated_keeps_settings(name):
     change(plugin, level_list=[80])
     plugin.request_apply()
     assert plugin._apply_latched
-    change(plugin, **{name: Expression('1/0')})
+    change_expression(plugin, name, '1/0')
 
     plugin.respond(1)  # False alarm, so there is a timeout
     assert len(plugin.h_results) == 1
     assert plugin.h_messages == [('critical', 'Cannot apply changes')]
     assert not plugin._apply_latched
-    assert plugin.context.ns.applied == 0
+    assert not applied(plugin)
 
     plugin.release(1)
     plugin.fire()  # Timeout
@@ -617,10 +612,10 @@ def test_state_parameter_using_trial_value_is_applied():
     # `level` is only known once a trial is prepared, so it cannot be
     # evaluated when Apply is clicked.
     plugin = make_plugin(target_probability=1)
-    change(plugin, iti_duration=Expression('level / 100'))
+    change_expression(plugin, 'iti_duration', 'level / 100')
     plugin.request_apply()
     assert plugin.h_messages == []
-    assert plugin.context.ns.applied == 1
+    assert applied(plugin)
 
 
 @pytest.mark.parametrize('request_name', ['request_trial', 'request_remind'])
@@ -721,7 +716,8 @@ def test_failed_prepare_recovers_on_request(request_name):
     # then, each request fails the same way.
     getattr(plugin, request_name)()
     assert plugin.trial_state == S.waiting_for_trial_start
-    plugin.context.ns.parameters['level_list'] = [60]
+    change(plugin, level_list=[60])
+    plugin.request_apply()
     getattr(plugin, request_name)()
     assert plugin.trial_state == S.waiting_for_response
 
@@ -750,7 +746,7 @@ def test_requests_ignored_after_stop(request_name):
     getattr(plugin, request_name)()
     assert plugin.experiment_state == 'stopped'
     assert plugin.n_waveforms == n
-    assert plugin.context.ns.applied == 0
+    assert not applied(plugin)
     assert not plugin.random_behavior_mode
     assert 'random_behavior' not in plugin.h_timers
 

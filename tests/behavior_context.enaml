@@ -1,0 +1,30 @@
+'''
+The context items an N-AFC behavior experiment declares, for building a real
+psiexperiment context in the tests (see `context.make_context`).
+'''
+from enaml.workbench.api import Extension
+
+from psi.controller.engines.null import NullEngine
+from psi.core.enaml.api import ExperimentManifest
+
+from psibehavior.paradigms.behavior_nafc import BehaviorContextItems
+
+
+enamldef BehaviorContext(ExperimentManifest): manifest:
+
+    id = 'behavior_context'
+
+    #: As for `BehaviorManifest`.
+    attr N_response = 1
+
+    BehaviorContextItems:
+        id = manifest.id + '.items'
+        N_response = manifest.N_response
+
+    Extension:
+        # The controller needs an engine; this one has no hardware.
+        id = manifest.id + '.io'
+        point = 'psi.controller.io'
+
+        NullEngine:
+            name = 'null'

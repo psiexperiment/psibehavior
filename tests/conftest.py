@@ -7,6 +7,24 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 
 
+@pytest.fixture(scope='session', autouse=True)
+def app():
+    '''
+    The tests build real psiexperiment contexts (see `context.make_context`),
+    which need the enaml application. Enaml allows only one per process.
+    '''
+    from enaml.application import Application
+    from enaml.qt.qt_application import QtApplication
+    return Application.instance() or QtApplication()
+
+
+@pytest.fixture(autouse=True)
+def stop_workbenches():
+    yield
+    from context import stop_workbenches
+    stop_workbenches()
+
+
 @pytest.fixture(autouse=True)
 def no_gui(monkeypatch):
     '''

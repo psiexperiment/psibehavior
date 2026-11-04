@@ -151,19 +151,6 @@ class BehaviorPlugin(BaseBehaviorPlugin):
 
     scores = NAFCTrialScore
 
-    state_parameters = (
-        'training_mode',
-        'manual_control',
-        'continuous_np',
-        'np_duration',
-        'target_delay',
-        'hold_duration',
-        'response_delay',
-        'response_duration',
-        'iti_duration',
-        'to_duration',
-    )
-
     def _default_events(self):
         members = {
             'hold_start': ('hold', 'start', -1, False),

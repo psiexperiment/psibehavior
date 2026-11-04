@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from psibehavior.paradigms.behavior_nafc_plugin import NAFCTrialScore
+from context import apply, change
 from stubs import (LegacyToyManager, Subject, StubController, ToyManager,
                    run_trial)
 
@@ -9,13 +10,20 @@ from stubs import (LegacyToyManager, Subject, StubController, ToyManager,
 SEQUENCE_KEYS = ('trial_type', 'trial_subtype', 'level', 'conditions',
                  'response', 'score', 'stim_start', 'stim_complete')
 
+#: The repeat modes the paradigm offers for go/nogo (one response port) and
+#: N-AFC. Mode 3 (false alarms only) is go/nogo only.
+REPEAT_MODES = [(1, mode) for mode in (0, 1, 2, 3)] + \
+    [(2, mode) for mode in (0, 1, 2)]
+
 
 def run_session(manager_class, n_trials=200, N_response=1, seed=0,
                 extra_prepares=None, between_prepares=None, remind=False,
                 **parameters):
     # The pre-M0 implementation rewarded references only via deliver_reward,
     # which ToyManager never does for them. Match it unless told otherwise.
-    parameters.setdefault('reward_correct_reference', False)
+    # (The setting only exists with a response port for references.)
+    if N_response > 1:
+        parameters.setdefault('reward_correct_reference', False)
     controller = StubController(N_response=N_response, **parameters)
     manager = manager_class(controller, seed=seed)
     subject = Subject(N_response=N_response, seed=seed + 1)
@@ -41,8 +49,7 @@ def run_session(manager_class, n_trials=200, N_response=1, seed=0,
     return rows, manager
 
 
-@pytest.mark.parametrize('N_response', [1, 2])
-@pytest.mark.parametrize('repeat_incorrect', [0, 1, 2, 3])
+@pytest.mark.parametrize('N_response, repeat_incorrect', REPEAT_MODES)
 @pytest.mark.parametrize('seed', [0, 1, 2])
 def test_matches_legacy(N_response, repeat_incorrect, seed):
     '''
@@ -80,8 +87,7 @@ def test_matches_legacy_with_remind_requests(N_response, repeat_incorrect,
     assert n_remind > 5
 
 
-@pytest.mark.parametrize('N_response', [1, 2])
-@pytest.mark.parametrize('repeat_incorrect', [0, 1, 2, 3])
+@pytest.mark.parametrize('N_response, repeat_incorrect', REPEAT_MODES)
 def test_reprepare_does_not_change_sequence(N_response, repeat_incorrect):
     '''
     Preparing a trial more than once before it starts (e.g., Apply with no
@@ -116,8 +122,7 @@ def test_reuse_after_apply_rewrites_context():
     calls = manager.next_stim_calls
 
     # Applying changes clears values set in the context.
-    controller.context.apply_changes()
-    controller.context.next_setting()
+    apply(controller.context)
     with pytest.raises(ValueError):
         controller.context.get_value('trial_type')
 
@@ -136,9 +141,8 @@ def test_parameter_change_replans_and_cancels_waveform():
     first = controller.output.waveforms[-1]
     assert controller.context.get_value('level') in (20, 40, 60)
 
-    controller.context.change(level_list=[80])
-    controller.context.apply_changes()
-    controller.context.next_setting()
+    change(controller.context, level_list=[80])
+    apply(controller.context)
     manager.prepare_trial()
     assert first.cancelled
     assert controller.context.get_value('level') == 80
@@ -146,9 +150,8 @@ def test_parameter_change_replans_and_cancels_waveform():
     assert second is not first and not second.cancelled
 
     # A behavior-only change (not a trial manager parameter) reuses the trial.
-    controller.context.change(iti_duration=5)
-    controller.context.apply_changes()
-    controller.context.next_setting()
+    change(controller.context, iti_duration=5)
+    apply(controller.context)
     manager.prepare_trial()
     assert controller.output.waveforms[-1] is second
     assert not second.cancelled
@@ -168,7 +171,7 @@ def test_started_waveform_never_cancelled_by_prepare():
     # Should not happen in practice, but must not touch the playing trial:
     # no new plan, waveform or context values (which would be logged with
     # the trial that is playing).
-    controller.context.change(level_list=[80])
+    change(controller.context, level_list=[80])
     controller.context.apply_changes()
     manager.prepare_trial()
     assert not played.cancelled
@@ -198,7 +201,8 @@ def test_failed_replan_keeps_prepared_trial():
     first = controller.output.waveforms[-1]
     level = controller.context.get_value('level')
 
-    controller.context.parameters['level_list'] = [-1]
+    change(controller.context, level_list=[-1])
+    apply(controller.context)
     with pytest.raises(ValueError):
         manager.prepare_trial()
     assert not first.cancelled
@@ -209,7 +213,8 @@ def test_failed_replan_keeps_prepared_trial():
         manager.prepare_trial()
 
     # Reverted: the original trial is reused and plays.
-    controller.context.parameters['level_list'] = [20, 40, 60]
+    change(controller.context, level_list=[20, 40, 60])
+    apply(controller.context)
     manager.prepare_trial()
     assert controller.context.get_value('level') == level
     manager.start_trial(0)
@@ -223,10 +228,12 @@ def test_failed_replan_then_new_values_cancels_old_trial():
     manager.prepare_trial()
     first = controller.output.waveforms[-1]
 
-    controller.context.parameters['level_list'] = [-1]
+    change(controller.context, level_list=[-1])
+    apply(controller.context)
     with pytest.raises(ValueError):
         manager.prepare_trial()
-    controller.context.parameters['level_list'] = [80]
+    change(controller.context, level_list=[80])
+    apply(controller.context)
     manager.prepare_trial()
     assert first.cancelled
     assert controller.context.get_value('level') == 80
@@ -309,9 +316,8 @@ def test_repeat_uses_completed_trial():
 
     # Target trials are never repeated in mode 3, even if a reference trial
     # was prepared (and discarded) in between.
-    controller.context.change(target_probability=0)
-    controller.context.apply_changes()
-    controller.context.next_setting()
+    change(controller.context, target_probability=0)
+    apply(controller.context)
     manager.prepare_trial()
     assert controller.context.get_value('trial_subtype') is None
 
@@ -338,17 +344,16 @@ def test_reward_conditions(N_response):
         # Unchecking the setting stops it, even when deliver_reward would
         # reward the reference stimulus (deliver_reward applies to targets
         # only).
-        controller.context.parameters['reward_correct_reference'] = False
-        controller.context.parameters['min_reward_level'] = 0
+        change(controller.context, reward_correct_reference=False,
+               min_reward_level=0)
+        apply(controller.context)
         assert manager.get_conditions(reference)[1] == []
         assert manager.get_conditions(target_hard)[1] == [2]
 
 
 def test_prefix_passed_to_get_value():
-    controller = StubController()
-    controller.context.parameters['toy_level_list'] = [80]
-    manager = ToyManager(controller, seed=0)
-    manager.prefix = 'toy_'
+    controller = StubController(prefix='toy_', toy_level_list=[80])
+    manager = ToyManager(controller, prefix='toy_', seed=0)
     assert manager.get_value('level_list') == [80]
 
 
@@ -374,17 +379,17 @@ class KwargsManager(ToyManager):
 
 
 def test_parameter_from_manager_kwargs_replans():
-    controller = StubController(remind_trials=0, warmup_trials=0,
-                                target_probability=1, level_list=[60],
-                                level_offset=0)
+    controller = StubController(
+        manager_path='test_trial_manager.KwargsManager',
+        manager_kwargs={'offset': True}, remind_trials=0, warmup_trials=0,
+        target_probability=1, level_list=[60], level_offset=0)
     manager = KwargsManager(controller)
     manager.manager_kwargs = {'offset': True}
     manager.prepare_trial()
     assert controller.context.get_value('level') == 60
 
-    controller.context.change(level_offset=10)
-    controller.context.apply_changes()
-    controller.context.next_setting()
+    change(controller.context, level_offset=10)
+    apply(controller.context)
     manager.prepare_trial()
     assert controller.context.get_value('level') == 70
     assert controller.output.waveforms[0].cancelled

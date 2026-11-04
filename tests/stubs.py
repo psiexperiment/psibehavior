@@ -1,126 +1,16 @@
 '''
-Stand-ins for the psiexperiment context, controller and output so that trial
-managers and the behavior plugin can be exercised without hardware or a GUI.
+Stand-ins for the psiexperiment controller and output so that trial managers
+and the behavior plugin can be exercised without hardware or a GUI. The
+context is a real one (see `context.make_context`).
 '''
 from threading import RLock
 
 import numpy as np
 
+from context import make_context
 from psibehavior.paradigms.api import NAFCTrialManager
 from psibehavior.paradigms.behavior_nafc_plugin import NAFCTrialScore
 from legacy_nafc import LegacyNAFCTrialManager
-
-
-DEFAULT_PARAMETERS = {
-    # Trial manager
-    'target_probability': 0.5,
-    'max_reference': 3,
-    'remind_trials': 2,
-    'warmup_trials': 4,
-    'level_list': [20, 40, 60],
-    'min_reward_level': 30,
-    # Behavior plugin
-    'repeat_incorrect': 0,
-    'reward_correct_reference': True,
-    'training_mode': False,
-    'manual_control': False,
-    'continuous_np': False,
-    'np_duration': 0.25,
-    'target_delay': 0.5,
-    'hold_duration': 0.0,
-    'response_delay': 0,
-    'response_duration': 3.0,
-    'iti_duration': 0.1,
-    'to_duration': 1.0,
-}
-
-
-class Invalid:
-    '''
-    A parameter value that fails validation (e.g., an expression with a typo).
-    '''
-
-    def __init__(self, message='invalid expression'):
-        self.message = message
-
-
-class Expression:
-    '''
-    A parameter value that passes validation but is evaluated as Python each
-    time it is read (e.g., `Expression('1/0')`), as psiexperiment does.
-    '''
-
-    def __init__(self, expression):
-        self.expression = expression
-
-
-class ContextNamespace:
-    '''
-    Mimics the parts of the psiexperiment context plugin used by trial
-    managers.
-
-    Parameters evaluate to their current value. Values set via `set_value(s)`
-    last until `next_setting` is called (as happens when changes are applied).
-    Parameter changes made via `change` only take effect on `apply_changes`.
-    '''
-
-    def __init__(self, **parameters):
-        self.parameters = {**DEFAULT_PARAMETERS, **parameters}
-        self.locals = {}
-        self.pending = {}
-        self.applied = 0
-
-    def get_value(self, name):
-        if name in self.locals:
-            return self.locals[name]
-        if name in self.parameters:
-            value = self.parameters[name]
-            if isinstance(value, Expression):
-                value = eval(value.expression, {},
-                             {**self.parameters, **self.locals})
-            return value
-        raise ValueError(f'Name {name} not defined')
-
-    def get_values(self):
-        return {**{n: self.get_value(n) for n in self.parameters},
-                **self.locals}
-
-    @property
-    def expressions(self):
-        # The expressions that would be applied, as psiexperiment provides
-        # them (one string per parameter).
-        expressions = {}
-        for name, value in {**self.parameters, **self.pending}.items():
-            if isinstance(value, Expression):
-                expressions[name] = value.expression
-            elif not isinstance(value, Invalid):
-                expressions[name] = repr(value)
-        return expressions
-
-    def set_value(self, name, value):
-        self.locals[name] = value
-
-    def set_values(self, values):
-        self.locals.update(values)
-
-    def change(self, **parameters):
-        self.pending.update(parameters)
-
-    def validate_expressions(self):
-        # Like psiexperiment, this checks the changes that have not been
-        # applied yet.
-        for name, value in self.pending.items():
-            if isinstance(value, Invalid):
-                raise ValueError(f'"{name}": {value.message}')
-
-    def apply_changes(self):
-        self.validate_expressions()
-        self.parameters.update(self.pending)
-        self.pending = {}
-        self.applied += 1
-
-    def next_setting(self, selector=None):
-        self.locals = {}
 
 
 class FakeWaveform:
@@ -170,8 +60,10 @@ class StubController:
     '''
     scores = NAFCTrialScore
 
-    def __init__(self, N_response=1, **parameters):
-        self.context = ContextNamespace(**parameters)
+    def __init__(self, N_response=1, manager_path='stubs.ToyManager',
+                 prefix='', manager_kwargs=None, **settings):
+        self.context = make_context(manager_path, N_response, prefix,
+                                    manager_kwargs, **settings)
         self.N_response = N_response
         self._remind_requested = False
         self.trial_state_str = ''

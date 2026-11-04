@@ -40,6 +40,184 @@ def get_current_state(experiment_state, trial_state):
         return trial_state.value.capitalize()
 
 
+enamldef BehaviorContextItems(Extension): items:
+    '''
+    The settings and results of a behavior experiment, contributed to the
+    context by `BehaviorManifest` (and by the tests, which use a real
+    context).
+    '''
+    point = 'psi.context.items'
+
+    #: As for `BehaviorManifest`.
+    attr N_response = 1
+    attr reward_reference_option = True
+
+    ContextGroup:
+        name = 'hardware_settings'
+        label = 'Hardware Settings'
+
+    ContextGroup:
+        name = 'trial'
+        label = 'Trial'
+
+        BoolParameter:
+            name = 'training_mode'
+            label = 'Training mode'
+            scope = 'arbitrary'
+            default = True
+        BoolParameter:
+            name = 'manual_control'
+            label = 'Manual control?'
+            scope = 'arbitrary'
+            default = False
+        BoolParameter:
+            name = 'continuous_np'
+            label = 'Allow continuous nose-poke?'
+            scope = 'arbitrary'
+            default = False
+
+        Conditional:
+            condition = items.N_response == 1
+            EnumParameter:
+                # Special case to repeat for FA only trials in the go/nogo 
+                name = 'repeat_incorrect'
+                label = 'Repeat incorrect/invalid trials?'
+                compact_label = 'repeat_incorrect'
+                default = 'No'
+                choices = {
+                    'No': 0,
+                    'Early withdraw only': 1,
+                    'False alarm (nogo) only': 3,
+                    'All': 2,
+                }
+                scope = 'arbitrary'
+        Conditional:
+            condition = items.N_response > 1
+            EnumParameter:
+                name = 'repeat_incorrect'
+                label = 'Repeat incorrect/invalid trials?'
+                compact_label = 'repeat_incorrect'
+                default = 'No'
+                choices = {
+                    'No': 0,
+                    'Early withdraw only': 1,
+                    'All trials': 2,
+                }
+                scope = 'arbitrary'
+            Conditional:
+                condition = items.reward_reference_option
+                BoolParameter:
+                    # Previously, correct responses on reference trials
+                    # were rewarded only if the trial manager's
+                    # `deliver_reward` returned True for the reference
+                    # stimulus. Now `deliver_reward` applies to targets
+                    # only.
+                    name = 'reward_correct_reference'
+                    label = 'Reward correct reference responses?'
+                    scope = 'arbitrary'
+                    default = True
+
+        Parameter:
+            name = 'np_duration'
+            label = 'Nose-poke start duration (s)'
+            compact_label = 'NP'
+            default = 0.25
+            scope = 'arbitrary'
+        Parameter:
+            name = 'target_delay'
+            label = 'Target delay (s)'
+            default = 0.5
+            scope = 'arbitrary'
+        Parameter:
+            name = 'hold_duration'
+            label = 'Nose-poke hold duration (s)'
+            compact_label = 'Hold'
+            default = 0.0
+            scope = 'arbitrary'
+        Parameter:
+            name = 'response_delay'
+            label = 'Response delay (s)'
+            compact_label = 'Resp'
+            default = 0
+            scope = 'arbitrary'
+        Parameter:
+            name = 'response_duration'
+            label = 'Response duration (s)'
+            compact_label = 'Resp'
+            default = 3.0
+            scope = 'arbitrary'
+        Parameter:
+            name = 'iti_duration'
+            label = 'Intertrial interval (s)'
+            compact_label = 'ITI'
+            default = 0.1
+            scope = 'arbitrary'
+        Parameter:
+            name = 'to_duration'
+            label = 'Timeout duration (s)'
+            compact_label = 'TO'
+            default = 1.0
+            scope = 'arbitrary'
+
+    ContextGroup:
+        name = 'results'
+        label = 'Trial results'
+
+        Result:
+            name = 'response'
+            compact_label = 'Resp.'
+            dtype = 'S32'
+        Result:
+            name = 'trial_type'
+            compact_label = 'Type'
+            dtype = 'S32'
+        Result:
+            name = 'trial_subtype'
+            compact_label = 'Trial subtype'
+            dtype = 'S32'
+        Result:
+            name = 'score'
+            dtype = 'S32'
+        Result:
+            name = 'correct'
+            compact_label = 'C'
+            dtype = 'bool'
+        Result:
+            name = 'reward_delivered'
+            label = 'Reward delivered'
+            compact_label = 'Rwd'
+            dtype = 'bool'
+        Result:
+            name = 'response_ts'
+            label = 'Response timestamp'
+            compact_label = 'R|'
+            dtype = 'float64'
+        Result:
+            name = 'trial_start'
+            compact_label = 'T/'
+            dtype = 'float64'
+        Result:
+            name = 'stim_start'
+            compact_label = 'S/'
+            dtype = 'float64'
+        Result:
+            name = 'stim_complete'
+            compact_label = 'S*'
+            dtype = 'bool'
+        Result:
+            name = 'np_actual_duration'
+            compact_label = 'NP dur. (actual)'
+            dtype = 'float64'
+        Result:
+            name = 'reaction_time'
+            compact_label = 'React. time'
+            dtype = 'float64'
+        Result:
+            name = 'response_time'
+            compact_label = 'Resp. time'
+            dtype = 'float64'
+
+
 enamldef BehaviorManifest(ControllerManifest): manifest:
     '''
     Defines the core settings that any behavior experiment may require. Does
@@ -206,174 +384,10 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     label = f'Loopback {loop_item+1}'
                     source_name = f'hw_ai::loopback_{loop_item+1}'
 
-    Extension:
+    BehaviorContextItems:
         id = manifest.id + '.items'
-        point = 'psi.context.items'
-
-        ContextGroup:
-            name = 'hardware_settings'
-            label = 'Hardware Settings'
-
-        ContextGroup:
-            name = 'trial'
-            label = 'Trial'
-
-            BoolParameter:
-                name = 'training_mode'
-                label = 'Training mode'
-                scope = 'arbitrary'
-                default = True
-            BoolParameter:
-                name = 'manual_control'
-                label = 'Manual control?'
-                scope = 'arbitrary'
-                default = False
-            BoolParameter:
-                name = 'continuous_np'
-                label = 'Allow continuous nose-poke?'
-                scope = 'arbitrary'
-                default = False
-
-            Conditional:
-                condition = manifest.N_response == 1
-                EnumParameter:
-                    # Special case to repeat for FA only trials in the go/nogo 
-                    name = 'repeat_incorrect'
-                    label = 'Repeat incorrect/invalid trials?'
-                    compact_label = 'repeat_incorrect'
-                    default = 'No'
-                    choices = {
-                        'No': 0,
-                        'Early withdraw only': 1,
-                        'False alarm (nogo) only': 3,
-                        'All': 2,
-                    }
-                    scope = 'arbitrary'
-            Conditional:
-                condition = manifest.N_response > 1
-                EnumParameter:
-                    name = 'repeat_incorrect'
-                    label = 'Repeat incorrect/invalid trials?'
-                    compact_label = 'repeat_incorrect'
-                    default = 'No'
-                    choices = {
-                        'No': 0,
-                        'Early withdraw only': 1,
-                        'All trials': 2,
-                    }
-                    scope = 'arbitrary'
-                Conditional:
-                    condition = manifest.reward_reference_option
-                    BoolParameter:
-                        # Previously, correct responses on reference trials
-                        # were rewarded only if the trial manager's
-                        # `deliver_reward` returned True for the reference
-                        # stimulus. Now `deliver_reward` applies to targets
-                        # only.
-                        name = 'reward_correct_reference'
-                        label = 'Reward correct reference responses?'
-                        scope = 'arbitrary'
-                        default = True
-
-            Parameter:
-                name = 'np_duration'
-                label = 'Nose-poke start duration (s)'
-                compact_label = 'NP'
-                default = 0.25
-                scope = 'arbitrary'
-            Parameter:
-                name = 'target_delay'
-                label = 'Target delay (s)'
-                default = 0.5
-                scope = 'arbitrary'
-            Parameter:
-                name = 'hold_duration'
-                label = 'Nose-poke hold duration (s)'
-                compact_label = 'Hold'
-                default = 0.0
-                scope = 'arbitrary'
-            Parameter:
-                name = 'response_delay'
-                label = 'Response delay (s)'
-                compact_label = 'Resp'
-                default = 0
-                scope = 'arbitrary'
-            Parameter:
-                name = 'response_duration'
-                label = 'Response duration (s)'
-                compact_label = 'Resp'
-                default = 3.0
-                scope = 'arbitrary'
-            Parameter:
-                name = 'iti_duration'
-                label = 'Intertrial interval (s)'
-                compact_label = 'ITI'
-                default = 0.1
-                scope = 'arbitrary'
-            Parameter:
-                name = 'to_duration'
-                label = 'Timeout duration (s)'
-                compact_label = 'TO'
-                default = 1.0
-                scope = 'arbitrary'
-
-        ContextGroup:
-            name = 'results'
-            label = 'Trial results'
-
-            Result:
-                name = 'response'
-                compact_label = 'Resp.'
-                dtype = 'S32'
-            Result:
-                name = 'trial_type'
-                compact_label = 'Type'
-                dtype = 'S32'
-            Result:
-                name = 'trial_subtype'
-                compact_label = 'Trial subtype'
-                dtype = 'S32'
-            Result:
-                name = 'score'
-                dtype = 'S32'
-            Result:
-                name = 'correct'
-                compact_label = 'C'
-                dtype = 'bool'
-            Result:
-                name = 'reward_delivered'
-                label = 'Reward delivered'
-                compact_label = 'Rwd'
-                dtype = 'bool'
-            Result:
-                name = 'response_ts'
-                label = 'Response timestamp'
-                compact_label = 'R|'
-                dtype = 'float64'
-            Result:
-                name = 'trial_start'
-                compact_label = 'T/'
-                dtype = 'float64'
-            Result:
-                name = 'stim_start'
-                compact_label = 'S/'
-                dtype = 'float64'
-            Result:
-                name = 'stim_complete'
-                compact_label = 'S*'
-                dtype = 'bool'
-            Result:
-                name = 'np_actual_duration'
-                compact_label = 'NP dur. (actual)'
-                dtype = 'float64'
-            Result:
-                name = 'reaction_time'
-                compact_label = 'React. time'
-                dtype = 'float64'
-            Result:
-                name = 'response_time'
-                compact_label = 'Resp. time'
-                dtype = 'float64'
+        N_response = manifest.N_response
+        reward_reference_option = manifest.reward_reference_option
 
     Extension:
         id = manifest.id + '.toolbar'

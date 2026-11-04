@@ -87,10 +87,9 @@ next trial has already been prepared, it is prepared again only if the changes
 affect the trial sequence or stimulus. Applying changes never shortens a
 timeout or the intertrial interval. Invalid changes (e.g., an expression with
 a typo, or a duration such as `1/0` that cannot be evaluated) are reported
-when Apply is clicked and are not applied. If changes
-made after clicking Apply turn out to be invalid when the trial ends, they are
-reported and not applied, and the experiment carries on with the settings
-already in effect.
+when they would be applied (immediately, or when the trial ends if Apply was
+clicked during a trial) and are not applied: the experiment carries on with
+the settings already in effect.
 
 If the next trial cannot be prepared (e.g., a stimulus setting the paradigm
 cannot generate), an error is shown and the animal cannot start a trial.
