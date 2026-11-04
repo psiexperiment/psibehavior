@@ -2,9 +2,9 @@ import logging
 log = logging.getLogger(__name__)
 
 import enum
+from functools import partial
 
 from atom.api import Bool, Dict, Int, List, Str, Typed
-from enaml.application import timed_call
 from enaml.core.api import d_
 import numpy as np
 
@@ -44,6 +44,25 @@ class NAFCTrialState(TrialState):
     waiting_for_iti = 'waiting for intertrial interval'
     waiting_for_np_end = 'waiting for nose-poke end'
     waiting_for_reward_end = 'waiting for reward contact'
+
+
+#: States during which a trial is in progress (the animal is poking or the
+#: stimulus is playing). Changes that affect the trial are deferred until the
+#: trial ends.
+IN_FLIGHT = {
+    NAFCTrialState.waiting_for_np_duration,
+    NAFCTrialState.waiting_for_hold,
+    NAFCTrialState.waiting_for_response,
+}
+
+#: States in which the experiment can be paused immediately. In any other
+#: state, the pause takes effect at the end of the intertrial interval (i.e.,
+#: after any timeout is complete).
+PAUSE_NOW = {
+    NAFCTrialState.waiting_for_resume,
+    NAFCTrialState.waiting_for_trial_start,
+    NAFCTrialState.waiting_for_np_start,
+}
 
 
 class BaseNAFCEvent(enum.Enum):
@@ -181,7 +200,66 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         super().handle_event(event, timestamp)
 
     def request_trial(self):
-        self.prepare_trial(auto_start=True)
+        self._submit_request(self._request_trial)
+
+    def _request_trial(self):
+        if self.experiment_state != 'running':
+            return
+        if self.trial_state in (NAFCTrialState.waiting_for_np_start,
+                                NAFCTrialState.waiting_for_np_duration):
+            # Start the trial that has already been prepared.
+            self.stop_event_timer()
+            self.start_trial()
+        elif self.trial_state == NAFCTrialState.waiting_for_iti:
+            # Skip the rest of the intertrial interval.
+            self.stop_event_timer()
+            if self._end_iti():
+                self.prepare_trial(auto_start=True)
+            else:
+                log.info('Not starting a trial since the experiment paused')
+        elif self.trial_state == NAFCTrialState.waiting_for_trial_start:
+            # The last attempt to prepare a trial failed. Try again.
+            self.prepare_trial(auto_start=True)
+        else:
+            log.warning('Cannot start a trial while %s', self.trial_state.value)
+
+    def _request_remind(self):
+        self._remind_requested = True
+        if self.experiment_state != 'running':
+            return
+        if self.trial_state in (NAFCTrialState.waiting_for_np_start,
+                                NAFCTrialState.waiting_for_trial_start):
+            self.prepare_trial(auto_start=True)
+        elif self.trial_state == NAFCTrialState.waiting_for_iti:
+            self.stop_event_timer()
+            # If the experiment pauses, the remind trial is the first trial
+            # after it resumes.
+            if self._end_iti():
+                self.prepare_trial(auto_start=True)
+        # Otherwise, the request is used when the next trial is prepared.
+
+    def apply_changes(self):
+        if self.trial_state in IN_FLIGHT:
+            return False
+        if not self._apply_context():
+            return True
+        # Only a prepared trial that has not started needs to be prepared
+        # again. In any other state (e.g., intertrial interval, timeout,
+        # waiting for resume), the next trial will be prepared with the new
+        # values when the time comes. In `waiting_for_trial_start`, the last
+        # attempt to prepare a trial failed, so the new values may fix it.
+        if self.trial_state in (NAFCTrialState.waiting_for_np_start,
+                                NAFCTrialState.waiting_for_trial_start):
+            self.prepare_trial()
+        return True
+
+    def pause_experiment(self):
+        if self.experiment_state == 'paused':
+            return True
+        if self.trial_state in PAUSE_NOW:
+            self._pause_now()
+            return True
+        return False
 
     def _default_trial_state(self):
         return NAFCTrialState.waiting_for_resume
@@ -216,23 +294,38 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             'response_ts': np.nan,
             'np_start': np.nan,
             'np_end': np.nan,
+            'reward_delivered': False,
         }
         self.trial_state = NAFCTrialState.waiting_for_trial_start
 
         #: TODO: Allow for capturing additional info here.
+        try:
+            conditions = self.trial_manager.prepare_trial()
+        except Exception as e:
+            # E.g., a stimulus parameter the trial manager cannot handle. Stay
+            # in `waiting_for_trial_start`, where the animal cannot start a
+            # trial. Apply, Request Remind, Start Trial and Resume all try
+            # again.
+            log.exception('Unable to prepare the next trial')
+            self.trial_state_str = f'Unable to prepare the next trial: {e}'
+            self.report_error(
+                'Unable to prepare the next trial',
+                f'{e}\n\nCorrect the settings and click Apply to try again.')
+            return
         self.response_condition, \
             self.reward_condition, \
-            self.timeout_condition = \
-            self.trial_manager.prepare_trial()
+            self.timeout_condition = conditions
 
         # Now trigger any callbacks that are listening for the trial_ready
         # event.
         self.invoke_actions('trial_ready')
         if auto_start:
             self.start_trial()
-        elif self.np_active:
+        elif self.np_active and self.experiment_state == 'running' \
+                and not self.manual_control:
             # If animal is already poking and ITI is over, go ahead and start
-            # trial.
+            # trial. Never start while paused (events are ignored while paused,
+            # so the trial would never end) or under manual control.
             self.trial_info['np_start'] = self.get_ts()
             self.start_trial()
         else:
@@ -263,6 +356,15 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.stop_event_timer()
             self.trial_state = NAFCTrialState.waiting_for_np_start
             self.trial_info['np_start'] = np.nan
+            # No trial is in progress anymore, so requests that were deferred
+            # while the animal was poking can take effect.
+            if self._pause_latched:
+                self._pause_now()
+            if self._apply_latched and self._apply_context():
+                self.prepare_trial()
+            elif self._remind_requested:
+                # Replace the prepared trial with a remind trial.
+                self.prepare_trial()
         elif event.category == 'np' and event.phase == 'elapsed':
             log.debug('Animal initiated trial')
             self.start_trial()
@@ -315,6 +417,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             if self.context.get_value('training_mode') \
                     and (len(self.reward_condition) == 1):
                 self.invoke_actions(f'deliver_reward_{self.reward_condition[0]}', timestamp)
+                self.trial_info['reward_delivered'] = True
             return
 
         if event.category == 'np' and event.phase == 'start':
@@ -343,6 +446,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             if not self.context.get_value('training_mode') and \
                     event.side in self.reward_condition:
                 self.invoke_actions(f'deliver_reward_{event.side}', timestamp)
+                self.trial_info['reward_delivered'] = True
         elif event.category == 'response' and event.phase == 'elapsed':
             self.invoke_actions('response_end', timestamp)
             self.trial_info['response_ts'] = np.nan
@@ -388,6 +492,15 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         self.trial_info.update(self.context.get_values())
         self.invoke_actions('trial_end', ts, kw={'result': self.trial_info.copy()})
 
+        # Apply pending changes that way any parameters (such as repeat_FA or
+        # go_probability) are reflected in determining the next trial type.
+        # This must happen after the trial result has been logged (applying
+        # changes clears the values in the context) and before we transition
+        # to the next state (which may prepare the next trial immediately if
+        # there is no intertrial interval).
+        if self._apply_latched:
+            self._apply_context()
+
         if self.trial_info['response_side'] in self.timeout_condition:
             if self.context.get_value('to_duration') > 0:
                 next_state = 'to'
@@ -411,11 +524,6 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.trial_state = NAFCTrialState.waiting_for_to
         else:
             self.advance_state('iti', ts)
-
-        # Apply pending changes that way any parameters (such as repeat_FA or
-        # go_probability) are reflected in determining the next trial type.
-        if self._apply_requested:
-            self.apply_changes()
 
     def advance_state(self, state, timestamp):
         log.info(f'Advancing to {state}')
@@ -466,31 +574,57 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.trial_state = NAFCTrialState.waiting_for_reward_end
         elif event == self.events.iti_duration_elapsed:
             self.invoke_actions(self.events.iti_end.name, timestamp)
-            if self._pause_requested:
-                self.pause_experiment()
-                self.trial_state = NAFCTrialState.waiting_for_resume
-            elif self.experiment_state != 'running':
-                pass
-            else:
+            if self._end_iti() and self.experiment_state == 'running':
                 self.prepare_trial()
 
+    def _end_iti(self):
+        '''
+        Act on the requests waiting for the end of the intertrial interval
+        (at its scheduled end, or when Start Trial or Request Remind ends it
+        early).
+
+        Returns False if the experiment paused, in which case the next trial
+        must not be prepared.
+        '''
+        # Normally consumed in end_trial. This is a backstop.
+        if self._apply_latched:
+            self._apply_context()
+        if self._pause_latched:
+            self._pause_now()
+            self.trial_state = NAFCTrialState.waiting_for_resume
+            return False
+        return True
+
     def start_random_behavior(self):
+        self._submit_request(self._start_random_behavior)
+
+    def _start_random_behavior(self):
         log.info('Starting random behavior mode')
         self.random_behavior_mode = True
-        timed_call(500, self.random_behavior_cb, self.events.digital_np_start)
+        self.start_timer('random_behavior', 0.5,
+                         partial(self.random_behavior_cb, self.events.digital_np_start))
 
     def stop_random_behavior(self):
+        # Must go through the dispatcher too. Otherwise, a quick on-off toggle
+        # can stop before the start runs, leaving random behavior running.
+        self._submit(self._stop_random_behavior)
+
+    def _stop_random_behavior(self):
+        log.info('Stopping random behavior mode')
         self.random_behavior_mode = False
+        self.stop_timer('random_behavior')
 
     def random_behavior_cb(self, event):
+        # Runs on the control dispatcher thread (via start_timer).
         if self.random_behavior_mode:
             log.info('Handling event %r', event)
             self.handle_event(event)
-            ms = np.random.uniform(100, 3000)
+            s = np.random.uniform(0.1, 3)
             if event == self.events.digital_np_start:
                 next_event = self.events.digital_np_end
             else:
                 next_event = self.events.digital_np_start
-            log.info('Starting next event for %d ms from now', ms)
+            log.info('Starting next event for %.1f s from now', s)
             if self.experiment_state == 'running':
-                timed_call(ms, self.random_behavior_cb, next_event)
+                self.start_timer('random_behavior', s,
+                                 partial(self.random_behavior_cb, next_event))
