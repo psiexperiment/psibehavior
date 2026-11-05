@@ -479,14 +479,14 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         # Now, update with information about the trial.
         response_time = self.trial_info['response_ts']-self.trial_info['trial_start']
         reaction_time = self.trial_info['np_end'] - self.trial_info['trial_start']
-        np = self.trial_info['np_end'] - self.trial_info['np_start']
+        np_actual_duration = self.trial_info['np_end'] - self.trial_info['np_start']
         self.trial_info.update({
             'response': response,
             'score': score.name,
             'correct': score == self.scores.correct,
             'response_time': response_time,
             'reaction_time': reaction_time,
-            'np_actual_duration': np,
+            'np_actual_duration': np_actual_duration,
         })
         self.trial_manager.trial_complete(response, score, self.trial_info)
         self.trial_info.update(self.context.get_values())
