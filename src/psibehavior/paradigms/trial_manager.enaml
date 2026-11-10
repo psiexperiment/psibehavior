@@ -136,6 +136,10 @@ enamldef ContinuousStimManagerManifest(ExperimentManifest): manifest:
     #: Keyword arguments that can be used to customize the manager.
     attr manager_kwargs = {}
 
+    #: Labels for the parameter groups (keyed by group name, including the
+    #: prefix), as for `TrialManagerManifest`.
+    attr group_labels = {}
+
     required = True
 
     #: Prefix to add to names that will be shown in GUI.

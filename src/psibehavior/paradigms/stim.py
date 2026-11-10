@@ -1,5 +1,6 @@
 import numpy as np
 from psiaudio.stim import BandlimitedFIRNoiseFactory
+from psiaudio.util import dbi
 
 
 class BaseContinuousStimManager:
@@ -79,6 +80,9 @@ class BandlimitedFIRNoise(BaseContinuousStimManager):
     def __init__(self, controller, output_names, prefix=''):
         super().__init__(controller, output_names, prefix)
         self.factories = {}
+        #: Level the noise is generated at. Changes to the level (it can be
+        #: changed at any time) scale the noise from there, so it plays on
+        #: without restarting the filter.
         self.level = self.get_value('masker_level')
 
         for name, output in self.outputs.items():
@@ -88,11 +92,11 @@ class BandlimitedFIRNoise(BaseContinuousStimManager):
                 fh=self.get_value('masker_fh')*1e3,
                 level=self.level,
                 calibration=output.calibration,
+                # The band at `level` overall, as labelled (otherwise it is
+                # quieter by the fraction of the spectrum it covers).
+                correct_level=True,
             )
 
-
     def next(self, samples, output):
-        if self.level != (level := self.get_value('masker_level')):
-            self.level = level
-            self.factories[output].update_level(self.level)
-        return self.factories[output].next(samples)
+        gain = dbi(self.get_value('masker_level') - self.level)
+        return self.factories[output].next(samples) * gain

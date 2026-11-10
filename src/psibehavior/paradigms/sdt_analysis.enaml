@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
-from atom.api import Bool, ContainerList, Float, Int, Value
+from atom.api import Bool, ContainerList, Enum, Float, Int, Value
 
 from enaml.core.api import d_
 from enaml.layout.api import hbox, vbox, spacer
@@ -33,6 +33,13 @@ class SDTAnalysisPlugin(Plugin):
     data = ContainerList()
     results = Value()
     fa = Float()
+
+    #: False alarm rate each stimulus's d' is computed against (set from
+    #: `SDTAnalysisManifest.fa_mode`, see there).
+    fa_mode = Enum('specific', 'overall')
+
+    def start(self):
+        self.fa_mode = self.manifest.fa_mode
 
     def append_data(self, event):
         self.data.append(event.parameters['result'])
@@ -81,22 +88,59 @@ class SDTAnalysisPlugin(Plugin):
             .rename(columns=rename)
         r['z_score'] = r['fraction_correct'].clip(lower=0.05, upper=0.95).apply(norm.ppf)
 
-        # Attempt to correct for the FA rate. If there is no NOGO, then assume
-        # the FA rate is 0.05 (which corresponds to a "correct" rate of 0.95.
-        # This code uses a stimulus-specific FA rate rather than the overall FA rate.
-        try:
-            reference = r.xs('reference', level='trial_type')['z_score'].reset_index(-1, drop=True)
-            r['z_score_norm'] = r['z_score'].sub(reference)
-        except Exception as e:
-            log.exception(e)
-            r['z_score_norm'] = np.nan
-            r = r.reset_index()
+        # Mean reaction time (trial start to leaving the nose-poke) of the
+        # "yes" responses: hits on targets, false alarms on references. Shown
+        # by `ReactionTimePlotManifest`. Computed while `r` is still indexed
+        # by the grouping (the FA correction below may flatten it).
+        rt = data[data['yes']].groupby(self.grouping)['reaction_time'].mean()
+        r['reaction_time'] = rt.reindex(r.index)
+
+        if self.fa_mode == 'overall':
+            # Every stimulus against the FA rate of all reference trials,
+            # clipped as the hit rates are. Needed when reference trials have
+            # no value for the grouping (e.g., the frequency and level of a
+            # tone not played), which the stimulus-specific correction below
+            # cannot match up.
+            fa_z = norm.ppf(np.clip(self.fa, 0.05, 0.95))
+            r['z_score_norm'] = r['z_score'] - fa_z
+        else:
+            # Attempt to correct for the FA rate. If there is no NOGO, then
+            # assume the FA rate is 0.05 (which corresponds to a "correct" rate
+            # of 0.95. This code uses a stimulus-specific FA rate rather than
+            # the overall FA rate.
+            try:
+                reference = r.xs('reference', level='trial_type')['z_score'].reset_index(-1, drop=True)
+                r['z_score_norm'] = r['z_score'].sub(reference)
+            except Exception as e:
+                log.exception(e)
+                r['z_score_norm'] = np.nan
+                r = r.reset_index()
 
         # The reset_index here renumbers the index from 0 ... n_rows
         self.results = r.sort_values(self.grouping).reset_index(drop=False)
 
         log.error('here')
         log.error(self.results)
+
+
+def target_results(results):
+    '''
+    The rows of the SDT results for targets. Reference trials have no value
+    for the parameter on the x axis (e.g., the level of a tone not played).
+    '''
+    if results is None or 'trial_type' not in results:
+        return None
+    return results[results['trial_type'] == 'target']
+
+
+def x_axis_label(workbench, grouping):
+    '''
+    Label for the column the SDT plot puts on the x axis (see
+    `SDTAnalysisManifest`).
+    '''
+    if len(grouping) < 2:
+        return 'Parameter'
+    return workbench.get_plugin('psi.context').get_item(grouping[-2]).label
 
 
 EXTRA_COLUMNS = {
@@ -111,6 +155,20 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
 
     id = 'sdt_analysis'
     title = 'SDT Analysis'
+
+    #: False alarm rate each stimulus's d' is computed against:
+    #:
+    #: * 'specific': the reference trials with the same values of the other
+    #:   grouping columns (e.g., the same frequency in gap detection, whose
+    #:   reference trials play the carrier without a gap);
+    #: * 'overall': all reference trials, for paradigms whose reference trials
+    #:   have no value for the stimulus parameters (e.g., tone detection,
+    #:   where no tone is played). The FA rate is clipped to 0.05-0.95, as
+    #:   the hit rates are.
+    #:
+    #: Set in the paradigm's `ParadigmDescription` (in the plugin's `attrs`).
+    attr fa_mode = 'specific'
+
     alias x_scale: plot_container.axis_scale
     alias x_min: plot_container.x_min
     alias x_max: plot_container.x_max
@@ -280,3 +338,39 @@ enamldef SDTAnalysisManifest(ExperimentManifest): manifest:
             item << sdt_table
             name << manifest.id
             auto_save = ['column_config']
+
+
+enamldef ReactionTimePlotManifest(ExperimentManifest): manifest:
+    '''
+    Plots the mean reaction time (trial start to leaving the nose-poke) of
+    hits, against the same parameter and with the same lines as the SDT
+    plot (see `SDTAnalysisManifest`, which must also be loaded and computes
+    it).
+    '''
+    id = 'reaction_time_plot'
+    title = 'Reaction time'
+
+    #: ID of the `SDTAnalysisManifest` whose results to plot.
+    attr sdt_id = 'sdt_analysis'
+
+    Extension:
+        id = manifest.id + '.plots'
+        point = 'psi.data.plots'
+
+        PlotContainer:
+            attr plugin = workbench.get_plugin(manifest.sdt_id)
+            label = manifest.title + ' plot'
+            name = manifest.id + '.plot'
+            x_label << x_axis_label(workbench, plugin.grouping)
+
+            ViewBox:
+                y_label = 'Reaction time (s)'
+                y_min = 0
+                y_max = 2
+                DataFramePlot:
+                    pen_color_cycle = 'palettable.cartocolors.qualitative.Safe_10'
+                    y_column = 'reaction_time'
+                    grouping << plugin.grouping[:-2]
+                    x_column << plugin.grouping[-2] \
+                        if len(plugin.grouping) > 1 else ''
+                    data << target_results(plugin.results)
