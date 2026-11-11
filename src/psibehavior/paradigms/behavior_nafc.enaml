@@ -454,13 +454,11 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                     iterable = range(N_response)
 
                     ChannelPlot:
-                        decimate_mode = 'none'
                         source_name = f'{response_name}_contact_{loop_item+1}_analog'
                         pen_color = looper.colors[loop_item]
                         label = f'Response {loop_item+1}'
 
                 ChannelPlot:
-                    decimate_mode = 'none'
                     source_name = 'np_contact_analog'
                     pen_color = 'black'
                     label = 'Nose-poke (initiate)'
@@ -477,7 +475,12 @@ enamldef BehaviorManifest(ControllerManifest): manifest:
                 y_min = -0.1
                 y_max = 0.1
 
+                # Left at the default decimation (min and max per pixel
+                # column): drawn in full, 5 s of a 96 kHz loopback is 480,000
+                # points per redraw, and painting them holds the GIL long
+                # enough to make the sound card callback late (the device
+                # then plays silence; see "Sound card timing" in
+                # psiexperiment's CLAUDE.md).
                 ChannelPlot:
                     source_name = 'loopback_1'
                     pen_color = 'black'
-                    decimate_mode = 'none'
