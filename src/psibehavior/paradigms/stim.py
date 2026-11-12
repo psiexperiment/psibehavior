@@ -92,9 +92,6 @@ class BandlimitedFIRNoise(BaseContinuousStimManager):
                 fh=self.get_value('masker_fh')*1e3,
                 level=self.level,
                 calibration=output.calibration,
-                # The band at `level` overall, as labelled (otherwise it is
-                # quieter by the fraction of the spectrum it covers).
-                correct_level=True,
             )
 
     def next(self, samples, output):
