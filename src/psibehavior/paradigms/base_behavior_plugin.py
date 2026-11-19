@@ -269,11 +269,23 @@ class BaseBehaviorPlugin(ControllerPlugin):
                 return
             getattr(self, f'handle_{self.trial_state.name}')(event, timestamp)
 
-    def start_event_timer(self, duration, event):
-        # We call the timer `experiment_state` to ensure that it properly ends
-        # any existing event-based timers.
+    def start_event_timer(self, duration, event, start=None):
+        '''
+        Handle `event` once `duration` (s, or the name of a context value)
+        has passed since `start`.
+
+        `start` is when the interval began (s, on the engine clock,
+        `get_ts`), e.g., the timestamp of the event that began it. The time
+        already gone by is taken off the timer, so the interval is not
+        lengthened by input lag or by work done between the event and
+        starting the timer (e.g., queueing the stimulus). If None, the timer
+        runs for `duration` from now.
+        '''
+        # One timer, named 'event', so starting one cancels any other.
         if isinstance(duration, str):
             duration = self.context.get_value(duration)
+        if start is not None:
+            duration = max(0, duration - max(self.get_ts() - start, 0))
         log.info('Starting timer for {} with duration {}'.format(event, duration))
         callback = partial(self.handle_event, event)
         self.start_timer('event', duration, callback, cancel_existing=True)

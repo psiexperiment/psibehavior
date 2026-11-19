@@ -29,6 +29,10 @@ class HarnessPlugin(BehaviorPlugin):
     #: Experiment state each time a trial started.
     h_start_states = Value(factory=list)
 
+    #: Seconds the clock (`h_ts`) moves on while each action runs, by event
+    #: name, e.g., for the work done when a trial starts or ends.
+    h_action_time = Value(factory=dict)
+
     #: If True, timers run on the real dispatcher (`call_later`) and every
     #: action makes a round trip through the dispatcher, as
     #: `invoke_actions(wait=True)` does. Otherwise, timers are fired by hand
@@ -39,6 +43,7 @@ class HarnessPlugin(BehaviorPlugin):
                        cancel_existing=True, kw=None, skip_errors=False,
                        wait=True):
         self.h_actions.append(event_name)
+        self.h_ts += self.h_action_time.get(event_name, 0)
         if event_name == 'trial_end':
             self.h_results.append(kw['result'])
         if self.h_real:
@@ -65,9 +70,9 @@ class HarnessPlugin(BehaviorPlugin):
         else:
             self.h_timers.pop(name, None)
 
-    def start_trial(self):
+    def start_trial(self, hold_start=None):
         self.h_start_states.append(self.experiment_state)
-        super().start_trial()
+        super().start_trial(hold_start)
 
     def _show_message(self, kind, title, message):
         self.h_messages.append((kind, title))
@@ -479,6 +484,88 @@ def test_timer_due_at_stop_does_not_continue_trial():
     assert plugin.trial_state == S.waiting_for_hold
     assert 'event' not in plugin.h_timers
     assert 'trial_end' not in plugin.h_actions
+
+
+def timer_duration(plugin):
+    return plugin.h_timers['event'][0]
+
+
+def test_hold_counts_from_np_duration_met():
+    '''
+    The hold is timed from when the animal met the nose-poke duration, not
+    from when the trial started or its timer was started after that (once
+    the stimulus is queued and the trial_start actions run).
+    '''
+    plugin = make_plugin(target_probability=1, np_duration=0.1,
+                         hold_duration=0.5)
+    # Starting the trial (queueing the stimulus, the trial_start actions)
+    # takes 0.2 s on the harness clock (`h_ts`, which starts at 0).
+    plugin.h_action_time['trial_start'] = 0.2
+    plugin.poke()  # At 0 s.
+    # The nose-poke duration was met at 0.1 s, but handled at 0.15 s, when
+    # the trial starts (`ts`).
+    plugin.h_timers.pop('event')
+    plugin.h_ts = 0.15
+    plugin.handle_event(plugin.events.np_duration_elapsed, 0.1)
+    assert plugin.trial_state == S.waiting_for_hold
+    # The hold ends at 0.6 s (0.1 + 0.5). Its timer starts at 0.35 s, so it
+    # runs for the 0.25 s left. (Timed from `ts`, the hold would end at
+    # 0.65 s.)
+    assert plugin.h_ts == pytest.approx(0.35)
+    assert timer_duration(plugin) == pytest.approx(0.25)
+
+
+def test_hold_counts_from_trial_start_without_np():
+    '''
+    A trial started on request (e.g., the toolbar) holds from its start.
+    '''
+    plugin = make_plugin(target_probability=1, hold_duration=0.5)
+    plugin.h_action_time['trial_start'] = 0.2
+    plugin.request_trial()
+    assert plugin.trial_state == S.waiting_for_hold
+    assert timer_duration(plugin) == pytest.approx(0.3)
+
+
+def test_np_duration_counts_from_poke():
+    '''
+    A poke that reaches the plugin late (e.g., behind the input backlog) is
+    timed from when it happened.
+    '''
+    plugin = make_plugin(target_probability=1, np_duration=0.1)
+    plugin.h_ts = 10
+    plugin.handle_event(plugin.events.np_start, 9.95)
+    assert timer_duration(plugin) == pytest.approx(0.05)
+
+
+def test_event_timer_never_negative():
+    plugin = make_plugin(target_probability=1, np_duration=0.1)
+    plugin.h_ts = 10
+    plugin.handle_event(plugin.events.np_start, 9.5)
+    assert timer_duration(plugin) == 0
+
+
+def test_iti_counts_from_trial_end():
+    '''
+    The ITI is timed from the end of the trial, not from after the trial
+    has been logged.
+    '''
+    plugin = make_plugin(target_probability=1, response_duration=1.0,
+                         iti_duration=1.0)
+    plugin.h_action_time['trial_end'] = 0.25
+    plugin.start_by_poking()
+    plugin.fire()  # No response
+    assert plugin.trial_state == S.waiting_for_iti
+    assert timer_duration(plugin) == pytest.approx(0.75)
+
+
+def test_timeout_counts_from_release():
+    plugin = make_plugin(target_probability=0, to_duration=1.0)
+    plugin.start_by_poking()
+    plugin.respond(1)  # False alarm
+    plugin.h_ts += 0.1
+    plugin.handle_event(plugin.events.resp_1_end, plugin.h_ts - 0.1)
+    assert plugin.trial_state == S.waiting_for_to
+    assert timer_duration(plugin) == pytest.approx(0.9)
 
 
 def test_invalid_apply_rejected():

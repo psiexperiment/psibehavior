@@ -343,7 +343,8 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         if event.category == 'np' and event.phase == 'start':
             # Animal has nose-poked in an attempt to initiate a trial.
             self.trial_state = NAFCTrialState.waiting_for_np_duration
-            self.start_event_timer('np_duration', self.events.np_duration_elapsed)
+            self.start_event_timer('np_duration', self.events.np_duration_elapsed,
+                                   start=timestamp)
             # If the animal does not maintain the nose-poke long enough,
             # this value will be deleted.
             self.trial_info['np_start'] = timestamp
@@ -367,9 +368,14 @@ class BehaviorPlugin(BaseBehaviorPlugin):
                 self.prepare_trial()
         elif event.category == 'np' and event.phase == 'elapsed':
             log.debug('Animal initiated trial')
-            self.start_trial()
+            self.start_trial(timestamp)
 
-    def start_trial(self):
+    def start_trial(self, hold_start=None):
+        '''
+        Start the prepared trial. The hold begins at `hold_start`, when the
+        animal met the nose-poke duration, or when the trial starts if None
+        (e.g., a trial started from the toolbar).
+        '''
         log.info('Starting next trial')
         target_delay = self.context.get_value('target_delay')
         # This is broken into a separate method from
@@ -384,7 +390,7 @@ class BehaviorPlugin(BaseBehaviorPlugin):
         # `handle_waiting_for_hold` with the event and timestamp the event
         # occurred at.
 
-        self.advance_state('hold', ts)
+        self.advance_state('hold', ts if hold_start is None else hold_start)
 
         # First, check to see if we expect the animal to hold the nose-poke for
         # a certain duration. If not, then go straight to the response phase.
@@ -520,7 +526,8 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             self.trial_state = NAFCTrialState.waiting_for_np_end
             self.next_trial_state = next_state
         elif next_state == 'to':
-            self.start_event_timer(f'to_duration', self.events.to_duration_elapsed)
+            self.start_event_timer('to_duration', self.events.to_duration_elapsed,
+                                   start=ts)
             self.trial_state = NAFCTrialState.waiting_for_to
         else:
             self.advance_state('iti', ts)
@@ -534,14 +541,16 @@ class BehaviorPlugin(BaseBehaviorPlugin):
             # Fast path to move to next event without having to go through timers
             getattr(self, f'handle_{self.trial_state.name}')(elapsed_event, timestamp)
         else:
-            self.start_event_timer(f'{state}_duration', elapsed_event)
+            self.start_event_timer(f'{state}_duration', elapsed_event,
+                                   start=timestamp)
             start_event = getattr(self.events, f'{state}_start')
             self.handle_event(start_event, timestamp)
 
     def handle_waiting_for_np_end(self, event, timestamp):
         if event.category == 'np' and event.phase == 'end':
             if self.next_trial_state == 'to':
-                self.start_event_timer(f'to_duration', self.events.to_duration_elapsed)
+                self.start_event_timer('to_duration', self.events.to_duration_elapsed,
+                                       start=timestamp)
                 self.trial_state = NAFCTrialState.waiting_for_to
             elif self.next_trial_state == 'iti':
                 self.advance_state('iti', timestamp)
@@ -549,7 +558,8 @@ class BehaviorPlugin(BaseBehaviorPlugin):
     def handle_waiting_for_reward_end(self, event, timestamp):
         if event.category == 'response' and event.phase == 'end':
             if self.next_trial_state == 'to':
-                self.start_event_timer(f'to_duration', self.events.to_duration_elapsed)
+                self.start_event_timer('to_duration', self.events.to_duration_elapsed,
+                                       start=timestamp)
                 self.trial_state = NAFCTrialState.waiting_for_to
             elif self.next_trial_state == 'iti':
                 self.advance_state('iti', timestamp)
